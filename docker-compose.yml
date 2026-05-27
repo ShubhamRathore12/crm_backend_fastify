@@ -2,6 +2,86 @@ version: '3.9'
 
 services:
   # ============================================================
+  # PostgreSQL — Main database
+  # ============================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_postgres_secret_2024}
+      POSTGRES_DB: ${POSTGRES_DB:-crm}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./supabase/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./supabase/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - crm-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ============================================================
+  # PostgREST — RESTful API over PostgreSQL (Supabase-compatible)
+  # ============================================================
+  postgrest:
+    image: postgrest/postgrest:v12.0.2
+    container_name: crm-postgrest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-crm_postgres_secret_2024}@postgres:5432/${POSTGRES_DB:-crm}
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-token-with-at-least-32-characters-long}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+    ports:
+      - "3400:3000"
+    networks:
+      - crm-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # ============================================================
+  # Nginx — Supabase-compatible API gateway
+  # Routes /rest/v1/* to PostgREST
+  # ============================================================
+  supabase-gateway:
+    image: nginx:alpine
+    container_name: crm-supabase-gateway
+    restart: unless-stopped
+    depends_on:
+      postgrest:
+        condition: service_started
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - crm-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # ============================================================
   # Redis — BullMQ queue backend
   # ============================================================
   redis:
@@ -11,19 +91,17 @@ services:
     command: >
       redis-server
       --requirepass ${REDIS_PASSWORD:-crm_redis_secret}
-      --maxmemory 2gb
+      --maxmemory 256mb
       --maxmemory-policy allkeys-lru
       --save 900 1
       --save 300 10
-      --save 60 10000
       --appendonly yes
       --appendfsync everysec
       --loglevel notice
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
-      - ./redis.conf:/usr/local/etc/redis/redis.conf:ro
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-crm_redis_secret}", "ping"]
       interval: 10s
@@ -35,10 +113,10 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 300M
 
   # ============================================================
-  # CRM API — Fastify HTTP server
+  # CRM API — Main application
   # ============================================================
   api:
     build:
@@ -50,22 +128,32 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      postgrest:
+        condition: service_started
+      supabase-gateway:
+        condition: service_started
     env_file:
       - .env
     environment:
       NODE_ENV: production
+      PORT: 8080
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-crm_redis_secret}
+      REDIS_DISABLED: "false"
+      SUPABASE_URL: http://supabase-gateway
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0}
     ports:
-      - "${PORT:-3000}:3000"
+      - "4200:8080"
     volumes:
       - ./logs:/app/logs
-      - dkim_keys:/etc/dkim:ro
     networks:
       - crm-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -73,12 +161,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 512M
         reservations:
-          memory: 256M
+          memory: 128M
 
   # ============================================================
-  # Email Worker — BullMQ worker (concurrency: 50)
+  # Email Worker — BullMQ worker
   # ============================================================
   email-worker:
     build:
@@ -91,6 +179,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -98,18 +188,18 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-crm_redis_secret}
+      REDIS_DISABLED: "false"
+      SUPABASE_URL: http://supabase-gateway
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
       EMAIL_QUEUE_CONCURRENCY: ${EMAIL_QUEUE_CONCURRENCY:-50}
-    volumes:
-      - dkim_keys:/etc/dkim:ro
     networks:
       - crm-network
     deploy:
-      replicas: 2  # Run 2 email worker instances for higher throughput
       resources:
         limits:
-          memory: 512M
+          memory: 256M
         reservations:
-          memory: 128M
+          memory: 64M
 
   # ============================================================
   # Campaign Worker — BullMQ campaign dispatch worker
@@ -125,6 +215,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -132,6 +224,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-crm_redis_secret}
+      REDIS_DISABLED: "false"
+      SUPABASE_URL: http://supabase-gateway
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU}
       CAMPAIGN_BATCH_SIZE: ${CAMPAIGN_BATCH_SIZE:-500}
     networks:
       - crm-network
@@ -142,31 +237,13 @@ services:
         reservations:
           memory: 64M
 
-  # ============================================================
-  # Redis Insight — Redis GUI (development only)
-  # ============================================================
-  redis-insight:
-    image: redislabs/redisinsight:latest
-    container_name: crm-redis-insight
-    restart: unless-stopped
-    ports:
-      - "8001:8001"
-    volumes:
-      - redis_insight_data:/db
-    networks:
-      - crm-network
-    profiles:
-      - dev  # Only start with: docker-compose --profile dev up
-
 # ============================================================
 # Named volumes
 # ============================================================
 volumes:
+  postgres_data:
+    driver: local
   redis_data:
-    driver: local
-  redis_insight_data:
-    driver: local
-  dkim_keys:
     driver: local
 
 # ============================================================
@@ -175,6 +252,3 @@ volumes:
 networks:
   crm-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16

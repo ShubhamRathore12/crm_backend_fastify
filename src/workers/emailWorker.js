@@ -86,7 +86,7 @@ async function processEmailJob(job) {
  * Create and start the email worker.
  */
 const worker = new Worker(QUEUE_NAMES.EMAIL, processEmailJob, {
-  connection: createRedisConnection('email-worker'),
+  connection: createRedisConnection('email-worker', { maxRetriesPerRequest: null }),
   concurrency: CONCURRENCY,
   limiter: EMAIL_WORKER_OPTIONS.limiter,
   settings: {

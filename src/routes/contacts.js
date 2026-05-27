@@ -1,39 +1,9 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
-const { supabase } = require('../config/supabase');
+const { getOptimizedSupabaseClient } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
-
-/**
- * Parse simple CSV text into array of objects.
- */
-function parseCSV(csv) {
-  const lines = csv.trim().split('\n');
-  if (lines.length < 2) throw new Error('CSV must have a header row and at least one data row');
-
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, '').toLowerCase());
-  const rows = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    const values = [];
-    let current = '';
-    let inQuotes = false;
-    for (const char of line) {
-      if (char === '"') { inQuotes = !inQuotes; }
-      else if (char === ',' && !inQuotes) { values.push(current.trim()); current = ''; }
-      else { current += char; }
-    }
-    values.push(current.trim());
-
-    const row = {};
-    headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
-    rows.push(row);
-  }
-  return rows;
-}
+const csvParser = require('../utils/csvParser');
 
 /**
  * Map CSV row to contact record matching Supabase schema.
@@ -72,6 +42,9 @@ function isValidEmail(email) {
 async function contactsRoutes(fastify, options) {
   fastify.addHook('preHandler', authenticate);
 
+  // Get optimized database client
+  const supabase = getOptimizedSupabaseClient();
+
   // ─── GET / ─── List contacts ───────────────────────────────────────
   fastify.get('/', {
     schema: {
@@ -93,30 +66,35 @@ async function contactsRoutes(fastify, options) {
     const { page = 1, limit = 50, search, ucc_code, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
-      .from('contacts')
-      .select('*', { count: 'exact' })
-      .range(offset, offset + limit - 1)
-      .order(sort, { ascending: order === 'asc' });
+    const { data, error, count } = await supabase.query('contacts', 'select', {
+      query: search ? {
+        $or: [
+          { email: { $ilike: `%${search}%` } },
+          { name: { $ilike: `%${search}%` } },
+          { mobile: { $ilike: `%${search}%` } },
+          { ucc_code: { $ilike: `%${search}%` } },
+          { pan: { $ilike: `%${search}%` } }
+        ]
+      } : ucc_code ? { ucc_code: { $ilike: `%${ucc_code}%` } } : {},
+      select: '*',
+      order: { column: sort, ascending: order === 'asc' },
+      limit,
+      offset,
+      cache: true
+    });
 
-    if (search) {
-      query = query.or(`email.ilike.%${search}%,name.ilike.%${search}%,mobile.ilike.%${search}%,ucc_code.ilike.%${search}%,pan.ilike.%${search}%`);
-    }
-    if (ucc_code) query = query.ilike('ucc_code', `%${ucc_code}%`);
-
-    const { data, error, count } = await query;
     if (error) {
       return reply.code(500).send({ error: 'Database error', message: error.message });
     }
 
     return reply.send({
-      data,
+      data: data.data || [],
       pagination: {
-        total: count,
+        total: count || 0,
         page,
         limit,
-        pages: Math.ceil(count / limit),
-        hasNext: offset + limit < count,
+        pages: Math.ceil((count || 0) / limit),
+        hasNext: offset + limit < (count || 0),
         hasPrev: page > 1,
       },
     });
@@ -134,45 +112,50 @@ async function contactsRoutes(fastify, options) {
       },
     },
   }, async (request, reply) => {
-    const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
-      .eq('id', request.params.id)
-      .single();
+    const { data, error } = await supabase.query('contacts', 'select', {
+      query: { id: request.params.id },
+      select: '*',
+      cache: true
+    });
 
-    if (error || !data) {
+    if (error || !data.data || data.data.length === 0) {
       return reply.code(404).send({ error: 'Not Found', message: 'Contact not found' });
     }
 
+    const contact = data.data[0];
+
     // Fetch related leads
-    const { data: leads } = await supabase
-      .from('leads')
-      .select('id, source, status, stage, created_at')
-      .eq('contact_id', request.params.id)
-      .order('created_at', { ascending: false });
+    const { data: leads } = await supabase.query('leads', 'select', {
+      query: { contact_id: request.params.id },
+      select: 'id, source, status, stage, created_at',
+      order: { column: 'created_at', ascending: false },
+      cache: true
+    });
 
     // Fetch related interactions
-    const { data: interactions } = await supabase
-      .from('interactions')
-      .select('id, channel, subject, status, created_at')
-      .eq('contact_id', request.params.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
+    const { data: interactions } = await supabase.query('interactions', 'select', {
+      query: { contact_id: request.params.id },
+      select: 'id, channel, subject, status, created_at',
+      order: { column: 'created_at', ascending: false },
+      limit: 10,
+      cache: true
+    });
 
     // Fetch email sends
-    const { data: emailSends } = await supabase
-      .from('email_sends')
-      .select('id, subject, to_email, read_at, created_at')
-      .eq('to_email', data.email)
-      .order('created_at', { ascending: false })
-      .limit(10);
+    const { data: emailSends } = await supabase.query('email_sends', 'select', {
+      query: { to_email: contact.email },
+      select: 'id, subject, to_email, read_at, created_at',
+      order: { column: 'created_at', ascending: false },
+      limit: 10,
+      cache: true
+    });
 
     return reply.send({
       data: {
-        ...data,
-        leads: leads || [],
-        interactions: interactions || [],
-        email_sends: emailSends || [],
+        ...contact,
+        leads: leads?.data || [],
+        interactions: interactions?.data || [],
+        email_sends: emailSends?.data || [],
       },
     });
   });
@@ -205,14 +188,14 @@ async function contactsRoutes(fastify, options) {
     }
 
     // Check for duplicate
-    const { data: existing } = await supabase
-      .from('contacts')
-      .select('id, email')
-      .eq('email', normalizedEmail)
-      .maybeSingle();
+    const { data: existing } = await supabase.query('contacts', 'select', {
+      query: { email: normalizedEmail },
+      select: 'id, email',
+      cache: false
+    });
 
-    if (existing) {
-      return reply.code(409).send({ error: 'Conflict', message: 'Contact with this email already exists', data: existing });
+    if (existing?.data && existing.data.length > 0) {
+      return reply.code(409).send({ error: 'Conflict', message: 'Contact with this email already exists', data: existing.data[0] });
     }
 
     const contact = {
@@ -227,12 +210,16 @@ async function contactsRoutes(fastify, options) {
       created_at: new Date().toISOString(),
     };
 
-    const { data, error } = await supabase.from('contacts').insert(contact).select().single();
+    const { data, error } = await supabase.query('contacts', 'insert', {
+      data: contact,
+      cache: false
+    });
+
     if (error) {
       return reply.code(500).send({ error: 'Database error', message: error.message });
     }
 
-    return reply.code(201).send({ data });
+    return reply.code(201).send({ data: data?.data?.[0] || contact });
   });
 
   // ─── PUT /:id ─── Update contact ──────────────────────────────────
@@ -266,19 +253,18 @@ async function contactsRoutes(fastify, options) {
       updates.email = updates.email.toLowerCase().trim();
     }
 
-    const { data, error } = await supabase
-      .from('contacts')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
+    const { data, error } = await supabase.query('contacts', 'update', {
+      id,
+      data: updates,
+      cache: false
+    });
 
     if (error) {
-      if (error.code === 'PGRST116') return reply.code(404).send({ error: 'Not Found', message: 'Contact not found' });
+      if (error.message?.includes('not found')) return reply.code(404).send({ error: 'Not Found', message: 'Contact not found' });
       return reply.code(500).send({ error: 'Database error', message: error.message });
     }
 
-    return reply.send({ data });
+    return reply.send({ data: data?.data?.[0] || null });
   });
 
   // ─── DELETE /:id ───────────────────────────────────────────────────
@@ -293,7 +279,10 @@ async function contactsRoutes(fastify, options) {
       },
     },
   }, async (request, reply) => {
-    const { error } = await supabase.from('contacts').delete().eq('id', request.params.id);
+    const { error } = await supabase.query('contacts', 'delete', {
+      id: request.params.id,
+      cache: false
+    });
     if (error) {
       return reply.code(500).send({ error: 'Database error', message: error.message });
     }
@@ -319,7 +308,7 @@ async function contactsRoutes(fastify, options) {
 
     let rows;
     try {
-      rows = parseCSV(csv);
+      rows = await csvParser.parseString(csv);
     } catch (err) {
       return reply.code(400).send({ error: 'CSV Parse Error', message: err.message });
     }
@@ -362,23 +351,28 @@ async function contactsRoutes(fastify, options) {
       const chunk = contacts.slice(i, i + CHUNK_SIZE);
 
       if (mode === 'upsert') {
-        const { data, error } = await supabase
-          .from('contacts')
-          .upsert(chunk, { onConflict: 'email', ignoreDuplicates: false })
-          .select('id');
+        const { data, error } = await supabase.query('contacts', 'insert', {
+          data: chunk,
+          options: { onConflict: 'email' },
+          cache: false
+        });
         if (error) { errors.push({ chunk: Math.floor(i / CHUNK_SIZE), error: error.message }); continue; }
-        inserted += data?.length || 0;
+        inserted += data?.data?.length || 0;
       } else if (mode === 'insert') {
-        const { data, error } = await supabase.from('contacts').insert(chunk).select('id');
+        const { data, error } = await supabase.query('contacts', 'insert', {
+          data: chunk,
+          cache: false
+        });
         if (error) { errors.push({ chunk: Math.floor(i / CHUNK_SIZE), error: error.message }); continue; }
-        inserted += data?.length || 0;
+        inserted += data?.data?.length || 0;
       } else if (mode === 'skip_duplicates') {
-        const { data, error } = await supabase
-          .from('contacts')
-          .upsert(chunk, { onConflict: 'email', ignoreDuplicates: true })
-          .select('id');
+        const { data, error } = await supabase.query('contacts', 'insert', {
+          data: chunk,
+          options: { onConflict: 'email', ignoreDuplicates: true },
+          cache: false
+        });
         if (error) { errors.push({ chunk: Math.floor(i / CHUNK_SIZE), error: error.message }); continue; }
-        inserted += data?.length || 0;
+        inserted += data?.data?.length || 0;
       }
     }
 
@@ -404,9 +398,28 @@ async function contactsRoutes(fastify, options) {
     },
   }, async (request, reply) => {
     const { ids } = request.body;
-    const { error, count } = await supabase.from('contacts').delete({ count: 'exact' }).in('id', ids);
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ deleted: count });
+    
+    // Batch delete operations
+    const deleteOperations = ids.map(id => ({
+      table: 'contacts',
+      operation: 'delete',
+      options: { id }
+    }));
+
+    const results = await supabase.batch(deleteOperations);
+    
+    const deletedCount = results.filter(r => r.success).length;
+    const errors = results.filter(r => !r.success);
+
+    if (errors.length > 0) {
+      return reply.code(500).send({ 
+        error: 'Database error', 
+        message: `Failed to delete ${errors.length} contacts`,
+        details: errors.map(e => e.error || 'Unknown error')
+      });
+    }
+
+    return reply.send({ deleted: deletedCount });
   });
 
   // ─── GET /:id/leads ─── Contact's leads ──────────────────────────
@@ -421,14 +434,15 @@ async function contactsRoutes(fastify, options) {
       },
     },
   }, async (request, reply) => {
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*, lead_scores(score, confidence, prediction)')
-      .eq('contact_id', request.params.id)
-      .order('created_at', { ascending: false });
+    const { data, error } = await supabase.query('leads', 'select', {
+      query: { contact_id: request.params.id },
+      select: '*, lead_scores(score, confidence, prediction)',
+      order: { column: 'created_at', ascending: false },
+      cache: true
+    });
 
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [] });
+    return reply.send({ data: data?.data || [] });
   });
 
   // ─── GET /:id/interactions ─── Contact's interactions ─────────────
@@ -453,18 +467,20 @@ async function contactsRoutes(fastify, options) {
     const { page = 1, limit = 20 } = request.query;
     const offset = (page - 1) * limit;
 
-    const { data, error, count } = await supabase
-      .from('interactions')
-      .select('*', { count: 'exact' })
-      .eq('contact_id', request.params.id)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    const { data, error, count } = await supabase.query('interactions', 'select', {
+      query: { contact_id: request.params.id },
+      select: '*',
+      order: { column: 'created_at', ascending: false },
+      limit,
+      offset,
+      cache: true
+    });
 
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
 
     return reply.send({
-      data: data || [],
-      pagination: { total: count, page, limit, pages: Math.ceil(count / limit) },
+      data: data?.data || [],
+      pagination: { total: count || 0, page, limit, pages: Math.ceil((count || 0) / limit) },
     });
   });
 
@@ -492,28 +508,32 @@ async function contactsRoutes(fastify, options) {
     const offset = (page - 1) * limit;
 
     // Get contact email first
-    const { data: contact } = await supabase
-      .from('contacts')
-      .select('email')
-      .eq('id', id)
-      .single();
+    const { data: contact } = await supabase.query('contacts', 'select', {
+      query: { id },
+      select: 'email',
+      cache: true
+    });
 
-    if (!contact) {
+    if (!contact?.data || contact.data.length === 0) {
       return reply.code(404).send({ error: 'Not Found', message: 'Contact not found' });
     }
 
-    const { data, error, count } = await supabase
-      .from('email_sends')
-      .select('*', { count: 'exact' })
-      .eq('to_email', contact.email)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    const contactEmail = contact.data[0].email;
+
+    const { data, error, count } = await supabase.query('email_sends', 'select', {
+      query: { to_email: contactEmail },
+      select: '*',
+      order: { column: 'created_at', ascending: false },
+      limit,
+      offset,
+      cache: true
+    });
 
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
 
     return reply.send({
-      data: data || [],
-      pagination: { total: count, page, limit, pages: Math.ceil(count / limit) },
+      data: data?.data || [],
+      pagination: { total: count || 0, page, limit, pages: Math.ceil((count || 0) / limit) },
     });
   });
 
@@ -524,20 +544,21 @@ async function contactsRoutes(fastify, options) {
       summary: 'Get contact statistics',
     },
   }, async (request, reply) => {
-    const { count: totalCount } = await supabase
-      .from('contacts')
-      .select('id', { count: 'exact', head: true });
+    const { data: totalCount } = await supabase.query('contacts', 'count', {
+      cache: true
+    });
 
-    const { data: recentContacts } = await supabase
-      .from('contacts')
-      .select('id, name, email, created_at')
-      .order('created_at', { ascending: false })
-      .limit(5);
+    const { data: recentContacts } = await supabase.query('contacts', 'select', {
+      select: 'id, name, email, created_at',
+      order: { column: 'created_at', ascending: false },
+      limit: 5,
+      cache: true
+    });
 
     return reply.send({
       data: {
-        total: totalCount || 0,
-        recent: recentContacts || [],
+        total: totalCount?.count || 0,
+        recent: recentContacts?.data || [],
       },
     });
   });

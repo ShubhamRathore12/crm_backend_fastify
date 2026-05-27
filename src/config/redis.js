@@ -49,9 +49,10 @@ function createRedisConfig() {
 /**
  * Create a Redis connection (standalone or cluster).
  * @param {string} name - Connection name for logging
+ * @param {object} [overrides] - Override options (e.g. { maxRetriesPerRequest: null } for BullMQ workers)
  * @returns {Redis | Redis.Cluster}
  */
-function createRedisConnection(name = 'default') {
+function createRedisConnection(name = 'default', overrides = {}) {
   const config = createRedisConfig();
 
   let client;
@@ -62,12 +63,12 @@ function createRedisConnection(name = 'default') {
         if (times > 6) return null;
         return REDIS_RETRY_DELAYS[Math.min(times - 1, REDIS_RETRY_DELAYS.length - 1)];
       },
-      redisOptions: config.commonOptions,
+      redisOptions: { ...config.commonOptions, ...overrides },
       scaleReads: 'slave',
       enableReadyCheck: true,
     });
   } else {
-    client = new Redis(config.options);
+    client = new Redis({ ...config.options, ...overrides });
   }
 
   client.on('connect', () => {

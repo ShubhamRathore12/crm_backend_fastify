@@ -10,8 +10,11 @@ const rateLimit = require('@fastify/rate-limit');
 const swagger = require('@fastify/swagger');
 const swaggerUI = require('@fastify/swagger-ui');
 const cron = require('node-cron');
+const compression = require('./middleware/compression');
+const cacheMiddleware = require('./middleware/cache');
 
 const { checkSupabaseHealth } = require('./config/supabase');
+const { getOptimizedSupabaseClient } = require('./config/database');
 const { checkRedisHealth, getRedisClient, closeRedisConnections } = require('./config/redis');
 const { syncBlockListsFromDB } = require('./services/emailService');
 const { getProviderHealth } = require('./services/providerService');
@@ -96,6 +99,12 @@ async function buildApp() {
     credentials: true,
     maxAge: 86400,
   });
+
+  // Compression (gzip/brotli)
+  await app.register(compression);
+
+  // Cache middleware
+  await cacheMiddleware.setup(app);
 
   // Rate limiting (per IP) - use Redis if available, fallback to in-memory
   const redisClient = getRedisClient();
@@ -327,44 +336,86 @@ function setupCronJobs(app) {
     }
   });
 
-  // Update campaign completion status every 5 minutes
+  // Update campaign completion status every 5 minutes - OPTIMIZED
   cron.schedule('*/5 * * * *', async () => {
     try {
-      const { supabase } = require('./config/supabase');
+      const supabase = getOptimizedSupabaseClient();
 
-      // Find dispatched campaigns where all emails are no longer queued
-      const { data: campaigns } = await supabase
-        .from('campaigns')
-        .select('id, queued_count')
-        .eq('status', 'dispatched');
+      // Single query to find campaigns ready for completion
+      const { data: campaigns } = await supabase.query('campaigns', 'select', {
+        query: { status: 'dispatched' },
+        select: 'id, queued_count',
+        cache: false,
+      });
 
-      for (const campaign of campaigns || []) {
-        const { count: queuedCount } = await supabase
-          .from('email_logs')
-          .select('id', { count: 'exact', head: true })
-          .eq('campaign_id', campaign.id)
-          .eq('status', 'queued');
+      if (!campaigns.data || campaigns.data.length === 0) return;
 
-        if (queuedCount === 0) {
-          const { data: sentData } = await supabase
-            .from('email_logs')
-            .select('status')
-            .eq('campaign_id', campaign.id);
+      // Batch check queued counts
+      const campaignIds = campaigns.data.map(c => c.id);
+      
+      // Single query to get queued counts for all campaigns
+      const { data: queuedCounts } = await supabase.query('email_logs', 'select', {
+        query: { 
+          campaign_id: { $in: campaignIds },
+          status: 'queued'
+        },
+        select: 'campaign_id',
+        cache: false,
+      });
 
-          const sentCount = (sentData || []).filter((l) =>
-            ['sent', 'delivered', 'opened', 'clicked'].includes(l.status)
-          ).length;
+      // Count queued emails per campaign
+      const queuedByCampaign = {};
+      if (queuedCounts.data) {
+        queuedCounts.data.forEach(log => {
+          queuedByCampaign[log.campaign_id] = (queuedByCampaign[log.campaign_id] || 0) + 1;
+        });
+      }
 
-          await supabase.from('campaigns').update({
+      // Single query to get sent counts for campaigns with no queued emails
+      const campaignsToComplete = campaigns.data.filter(c => !queuedByCampaign[c.id]);
+      if (campaignsToComplete.length === 0) return;
+
+      const completeIds = campaignsToComplete.map(c => c.id);
+      
+      // Get sent counts in batch
+      const { data: sentStats } = await supabase.query('email_logs', 'select', {
+        query: { 
+          campaign_id: { $in: completeIds },
+          status: { $in: ['sent', 'delivered', 'opened', 'clicked'] }
+        },
+        select: 'campaign_id, status',
+        cache: false,
+      });
+
+      // Count sent emails per campaign
+      const sentByCampaign = {};
+      if (sentStats.data) {
+        sentStats.data.forEach(log => {
+          sentByCampaign[log.campaign_id] = (sentByCampaign[log.campaign_id] || 0) + 1;
+        });
+      }
+
+      // Batch update all completed campaigns
+      const updateOperations = campaignsToComplete.map(campaign => ({
+        table: 'campaigns',
+        operation: 'update',
+        options: {
+          id: campaign.id,
+          data: {
             status: 'completed',
-            sent_count: sentCount,
+            sent_count: sentByCampaign[campaign.id] || 0,
             completed_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-          }).eq('id', campaign.id);
-
-          app.log.info({ campaignId: campaign.id, sentCount }, 'Campaign marked as completed');
+          }
         }
-      }
+      }));
+
+      await supabase.batch(updateOperations);
+      
+      app.log.info({ 
+        completed: campaignsToComplete.length,
+        campaignIds: campaignsToComplete.map(c => c.id) 
+      }, 'Campaigns marked as completed');
     } catch (err) {
       app.log.error({ err }, 'Cron: Campaign completion check failed');
     }

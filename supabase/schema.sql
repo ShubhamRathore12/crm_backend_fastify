@@ -3,9 +3,28 @@
 -- Run this in your Supabase SQL editor or via supabase db push
 -- ============================================================
 
+-- Create roles required by PostgREST
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+    CREATE ROLE service_role NOLOGIN;
+  END IF;
+END
+$$;
+
+-- Grant schema usage to roles
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- ============================================================
 -- CONTACTS
@@ -36,9 +55,6 @@ CREATE INDEX IF NOT EXISTS contacts_created_at_idx ON public.contacts (created_a
 CREATE INDEX IF NOT EXISTS contacts_tags_gin_idx ON public.contacts USING GIN (tags);
 CREATE INDEX IF NOT EXISTS contacts_custom_fields_gin_idx ON public.contacts USING GIN (custom_fields);
 CREATE INDEX IF NOT EXISTS contacts_email_trgm_idx ON public.contacts USING GIN (email gin_trgm_ops);
-
--- Enable trigram extension for ILIKE searches
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Auto-update updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()

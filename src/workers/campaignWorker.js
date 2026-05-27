@@ -263,7 +263,7 @@ async function processCampaignJob(job) {
  * Create and start the campaign worker.
  */
 const worker = new Worker(QUEUE_NAMES.CAMPAIGN, processCampaignJob, {
-  connection: createRedisConnection('campaign-worker'),
+  connection: createRedisConnection('campaign-worker', { maxRetriesPerRequest: null }),
   concurrency: CAMPAIGN_WORKER_OPTIONS.concurrency,
   settings: {
     backoffStrategy: customBackoffStrategy,

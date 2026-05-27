@@ -5,10 +5,10 @@
  */
 
 const QUEUE_NAMES = {
-  EMAIL: 'email:queue',
-  CAMPAIGN: 'campaign:queue',
-  BOUNCE: 'bounce:queue',
-  ANALYTICS: 'analytics:queue',
+  EMAIL: 'email-queue',
+  CAMPAIGN: 'campaign-queue',
+  BOUNCE: 'bounce-queue',
+  ANALYTICS: 'analytics-queue',
 };
 
 const QUEUE_DEFAULTS = {

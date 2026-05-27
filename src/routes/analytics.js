@@ -1,12 +1,15 @@
 'use strict';
 
-const { supabase } = require('../config/supabase');
+const { getOptimizedSupabaseClient } = require('../config/database');
 const { authenticate } = require('../middleware/auth');
 const { getProviderHealth } = require('../services/providerService');
 const { getQueueStats } = require('../services/queueService');
 
 async function analyticsRoutes(fastify, options) {
   fastify.addHook('preHandler', authenticate);
+
+  // Get optimized database client
+  const supabase = getOptimizedSupabaseClient();
 
   // ─── GET /overview ─── CRM Dashboard ─────────────────────────────
   fastify.get('/overview', {
@@ -33,75 +36,105 @@ async function analyticsRoutes(fastify, options) {
       campaignsResult,
       emailSendsResult,
     ] = await Promise.all([
-      supabase.from('contacts').select('id', { count: 'exact', head: true }),
-      supabase.from('leads').select('status, stage', { count: 'exact', head: false }).gte('created_at', since),
-      supabase.from('opportunities').select('stage, value', { count: 'exact', head: false }).gte('created_at', since),
-      supabase.from('tasks').select('status', { count: 'exact', head: false }).gte('created_at', since),
-      supabase.from('interactions').select('channel, status', { count: 'exact', head: false }).gte('created_at', since),
-      supabase.from('bulk_email_campaigns').select('status, sent_count, failed_count', { count: 'exact', head: false }).gte('created_at', since),
-      supabase.from('email_sends').select('id, read_at', { count: 'exact', head: false }).gte('created_at', since),
+      supabase.query('contacts', 'count', { cache: true }),
+      supabase.query('leads', 'select', {
+        query: { created_at: { $gte: since } },
+        select: 'status, stage',
+        cache: true
+      }),
+      supabase.query('opportunities', 'select', {
+        query: { created_at: { $gte: since } },
+        select: 'stage, value',
+        cache: true
+      }),
+      supabase.query('tasks', 'select', {
+        query: { created_at: { $gte: since } },
+        select: 'status',
+        cache: true
+      }),
+      supabase.query('interactions', 'select', {
+        query: { created_at: { $gte: since } },
+        select: 'channel, status',
+        cache: true
+      }),
+      supabase.query('bulk_email_campaigns', 'select', {
+        query: { created_at: { $gte: since } },
+        select: 'status, sent_count, failed_count',
+        cache: true
+      }),
+      supabase.query('email_sends', 'select', {
+        query: { created_at: { $gte: since } },
+        select: 'id, read_at',
+        cache: true
+      }),
     ]);
 
     // Lead stats
-    const leadsByStatus = (leadsResult.data || []).reduce((acc, l) => {
+    const leadsData = leadsResult.data || [];
+    const leadsByStatus = leadsData.reduce((acc, l) => {
       acc[l.status] = (acc[l.status] || 0) + 1;
       return acc;
     }, {});
-    const leadsByStage = (leadsResult.data || []).reduce((acc, l) => {
+    const leadsByStage = leadsData.reduce((acc, l) => {
       acc[l.stage] = (acc[l.stage] || 0) + 1;
       return acc;
     }, {});
 
     // Opportunity stats
-    const oppsByStage = (opportunitiesResult.data || []).reduce((acc, o) => {
+    const oppsData = opportunitiesResult.data || [];
+    const oppsByStage = oppsData.reduce((acc, o) => {
       acc[o.stage] = (acc[o.stage] || 0) + 1;
       return acc;
     }, {});
-    const totalPipelineValue = (opportunitiesResult.data || []).reduce((sum, o) => sum + (parseFloat(o.value) || 0), 0);
+    const totalPipelineValue = oppsData.reduce((sum, o) => sum + (parseFloat(o.value) || 0), 0);
 
     // Task stats
-    const tasksByStatus = (tasksResult.data || []).reduce((acc, t) => {
+    const tasksData = tasksResult.data || [];
+    const tasksByStatus = tasksData.reduce((acc, t) => {
       acc[t.status] = (acc[t.status] || 0) + 1;
       return acc;
     }, {});
 
     // Interaction stats
-    const interactionsByChannel = (interactionsResult.data || []).reduce((acc, i) => {
+    const interactionsData = interactionsResult.data || [];
+    const interactionsByChannel = interactionsData.reduce((acc, i) => {
       acc[i.channel] = (acc[i.channel] || 0) + 1;
       return acc;
     }, {});
 
     // Campaign stats
-    const totalSent = (campaignsResult.data || []).reduce((sum, c) => sum + (c.sent_count || 0), 0);
-    const totalFailed = (campaignsResult.data || []).reduce((sum, c) => sum + (c.failed_count || 0), 0);
+    const campaignsData = campaignsResult.data || [];
+    const totalSent = campaignsData.reduce((sum, c) => sum + (c.sent_count || 0), 0);
+    const totalFailed = campaignsData.reduce((sum, c) => sum + (c.failed_count || 0), 0);
 
     // Email open rate
-    const emailTotal = emailSendsResult.count || 0;
-    const emailRead = (emailSendsResult.data || []).filter(e => e.read_at).length;
+    const emailData = emailSendsResult.data || [];
+    const emailTotal = emailData.length;
+    const emailRead = emailData.filter(e => e.read_at).length;
 
     return reply.send({
       period: { days, since },
       contacts: { total: contactsResult.count || 0 },
       leads: {
-        total: leadsResult.count || 0,
+        total: leadsData.length,
         byStatus: leadsByStatus,
         byStage: leadsByStage,
       },
       opportunities: {
-        total: opportunitiesResult.count || 0,
+        total: oppsData.length,
         byStage: oppsByStage,
         totalPipelineValue,
       },
       tasks: {
-        total: tasksResult.count || 0,
+        total: tasksData.length,
         byStatus: tasksByStatus,
       },
       interactions: {
-        total: interactionsResult.count || 0,
+        total: interactionsData.length,
         byChannel: interactionsByChannel,
       },
       campaigns: {
-        total: campaignsResult.count || 0,
+        total: campaignsData.length,
         totalSent,
         totalFailed,
       },
@@ -327,6 +360,46 @@ async function analyticsRoutes(fastify, options) {
       queues: queueStats,
       providers: providerHealth,
     });
+  });
+
+  // ─── GET /performance ─── Performance metrics ─────────────────────
+  fastify.get('/performance', {
+    schema: {
+      tags: ['Analytics'],
+      summary: 'System performance metrics and optimization recommendations',
+    },
+  }, async (request, reply) => {
+    try {
+      const performanceMonitor = require('../utils/performance');
+      const { getOptimizedSupabaseClient } = require('../config/database');
+      const cacheMiddleware = require('../middleware/cache');
+
+      // Get performance metrics
+      const performanceMetrics = performanceMonitor.getMetrics();
+      const performanceReport = performanceMonitor.generateReport();
+
+      // Get database metrics
+      const dbClient = getOptimizedSupabaseClient();
+      const dbMetrics = dbClient.getMetrics();
+
+      // Get cache metrics
+      const cacheMetrics = cacheMiddleware.getMetrics();
+
+      return reply.send({
+        timestamp: new Date().toISOString(),
+        performance: performanceMetrics,
+        report: performanceReport,
+        database: dbMetrics,
+        cache: cacheMetrics,
+        recommendations: performanceReport.recommendations,
+      });
+    } catch (err) {
+      request.log.error({ err }, 'Failed to get performance metrics');
+      return reply.code(500).send({ 
+        error: 'Performance Metrics Error', 
+        message: err.message 
+      });
+    }
   });
 }
 
