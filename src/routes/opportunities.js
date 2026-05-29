@@ -63,18 +63,42 @@ async function opportunitiesRoutes(fastify, opts) {
         properties: {
           page: { type: 'integer', minimum: 1, default: 1 },
           limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 },
+          search: { type: 'string' },
           stage: { type: 'string' },
           assigned_to: { type: 'string', format: 'uuid' },
           lead_id: { type: 'string', format: 'uuid' },
           min_value: { type: 'number' },
           max_value: { type: 'number' },
+          min_probability: { type: 'integer', minimum: 0, maximum: 100 },
+          max_probability: { type: 'integer', minimum: 0, maximum: 100 },
+          created_after: { type: 'string', format: 'date-time' },
+          created_before: { type: 'string', format: 'date-time' },
+          expected_close_after: { type: 'string', format: 'date-time' },
+          expected_close_before: { type: 'string', format: 'date-time' },
           sort: { type: 'string', default: 'created_at', enum: ['created_at', 'value', 'probability', 'expected_closed_at'] },
           order: { type: 'string', default: 'desc', enum: ['asc', 'desc'] },
         },
       },
     },
   }, async (request, reply) => {
-    const { page = 1, limit = 50, stage, assigned_to, lead_id, min_value, max_value, sort = 'created_at', order = 'desc' } = request.query;
+    const {
+      page = 1,
+      limit = 50,
+      search,
+      stage,
+      assigned_to,
+      lead_id,
+      min_value,
+      max_value,
+      min_probability,
+      max_probability,
+      created_after,
+      created_before,
+      expected_close_after,
+      expected_close_before,
+      sort = 'created_at',
+      order = 'desc',
+    } = request.query;
     const offset = (page - 1) * limit;
 
     let query = supabase.from('opportunities')
@@ -82,11 +106,18 @@ async function opportunitiesRoutes(fastify, opts) {
       .range(offset, offset + limit - 1)
       .order(sort, { ascending: order === 'asc' });
 
+    if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
     if (stage) query = query.eq('stage', stage);
     if (assigned_to) query = query.eq('assigned_to', assigned_to);
     if (lead_id) query = query.eq('lead_id', lead_id);
     if (min_value) query = query.gte('value', min_value);
     if (max_value) query = query.lte('value', max_value);
+    if (min_probability) query = query.gte('probability', min_probability);
+    if (max_probability) query = query.lte('probability', max_probability);
+    if (created_after) query = query.gte('created_at', created_after);
+    if (created_before) query = query.lte('created_at', created_before);
+    if (expected_close_after) query = query.gte('expected_closed_at', expected_close_after);
+    if (expected_close_before) query = query.lte('expected_closed_at', expected_close_before);
 
     const { data, error, count } = await query;
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });

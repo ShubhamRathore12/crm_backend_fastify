@@ -59,18 +59,34 @@ async function interactionsRoutes(fastify, opts) {
         properties: {
           page: { type: 'integer', minimum: 1, default: 1 },
           limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 },
+          search: { type: 'string' },
           contact_id: { type: 'string', format: 'uuid' },
           channel: { type: 'string' },
           status: { type: 'string' },
           priority: { type: 'string' },
           assigned_to: { type: 'string', format: 'uuid' },
+          created_after: { type: 'string', format: 'date-time' },
+          created_before: { type: 'string', format: 'date-time' },
           sort: { type: 'string', default: 'created_at' },
           order: { type: 'string', default: 'desc', enum: ['asc', 'desc'] },
         },
       },
     },
   }, async (request, reply) => {
-    const { page = 1, limit = 50, contact_id, channel, status, priority, assigned_to, sort = 'created_at', order = 'desc' } = request.query;
+    const {
+      page = 1,
+      limit = 50,
+      search,
+      contact_id,
+      channel,
+      status,
+      priority,
+      assigned_to,
+      created_after,
+      created_before,
+      sort = 'created_at',
+      order = 'desc',
+    } = request.query;
     const offset = (page - 1) * limit;
 
     let query = supabase.from('interactions')
@@ -78,11 +94,14 @@ async function interactionsRoutes(fastify, opts) {
       .range(offset, offset + limit - 1)
       .order(sort, { ascending: order === 'asc' });
 
+    if (search) query = query.or(`subject.ilike.%${search}%`);
     if (contact_id) query = query.eq('contact_id', contact_id);
     if (channel) query = query.eq('channel', channel);
     if (status) query = query.eq('status', status);
     if (priority) query = query.eq('priority', priority);
     if (assigned_to) query = query.eq('assigned_to', assigned_to);
+    if (created_after) query = query.gte('created_at', created_after);
+    if (created_before) query = query.lte('created_at', created_before);
 
     const { data, error, count } = await query;
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });

@@ -267,6 +267,57 @@ async function contactsRoutes(fastify, options) {
     return reply.send({ data: data?.data?.[0] || null });
   });
 
+  // ─── GET /:id/linked-records ─── Check linked leads and opportunities ──
+  fastify.get('/:id/linked-records', {
+    schema: {
+      tags: ['Contacts'],
+      summary: 'Get linked leads and opportunities for a contact',
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string', format: 'uuid' } },
+        required: ['id'],
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+
+    // Get linked leads
+    const { data: leadsData } = await supabase.query('leads', 'select', {
+      query: { contact_id: id },
+      select: 'id, source, status, stage, created_at',
+      order: { column: 'created_at', ascending: false },
+      cache: false
+    });
+
+    const leads = leadsData?.data || [];
+    const leadIds = leads.map(l => l.id);
+
+    // Get linked opportunities
+    let opportunities = [];
+    if (leadIds.length > 0) {
+      const { data: oppsData } = await supabase.query('opportunities', 'select', {
+        query: { lead_id: { $in: leadIds } },
+        select: 'id, title, stage, value, currency, created_at',
+        order: { column: 'created_at', ascending: false },
+        cache: false
+      });
+      opportunities = oppsData?.data || [];
+    }
+
+    return reply.send({
+      data: {
+        leads: {
+          count: leads.length,
+          records: leads,
+        },
+        opportunities: {
+          count: opportunities.length,
+          records: opportunities,
+        },
+      },
+    });
+  });
+
   // ─── DELETE /:id ───────────────────────────────────────────────────
   fastify.delete('/:id', {
     schema: {
@@ -277,15 +328,95 @@ async function contactsRoutes(fastify, options) {
         properties: { id: { type: 'string', format: 'uuid' } },
         required: ['id'],
       },
+      querystring: {
+        type: 'object',
+        properties: {
+          cascade: { type: 'boolean', default: false, description: 'If true, delete linked leads and opportunities' },
+        },
+      },
     },
   }, async (request, reply) => {
-    const { error } = await supabase.query('contacts', 'delete', {
-      id: request.params.id,
+    const { id } = request.params;
+    const { cascade = false } = request.query;
+
+    // Check for linked leads and opportunities
+    const { data: linkedLeads } = await supabase.query('leads', 'select', {
+      query: { contact_id: id },
+      select: 'id',
       cache: false
     });
+
+    const { data: linkedOpps } = await supabase.query('opportunities', 'select', {
+      query: { lead_id: { $in: (linkedLeads?.data || []).map(l => l.id) } },
+      select: 'id',
+      cache: false
+    });
+
+    const leadsCount = linkedLeads?.data?.length || 0;
+    const oppsCount = linkedOpps?.data?.length || 0;
+
+    // If cascade is false and there are linked records, return error with details
+    if (!cascade && (leadsCount > 0 || oppsCount > 0)) {
+      return reply.code(409).send({
+        error: 'Conflict',
+        message: 'Contact has linked leads and/or opportunities. Set cascade=true to delete them as well.',
+        linkedRecords: {
+          leads: leadsCount,
+          opportunities: oppsCount,
+        },
+      });
+    }
+
+    // If cascade is true, delete linked records first
+    if (cascade && (leadsCount > 0 || oppsCount > 0)) {
+      // Delete opportunities first
+      if (oppsCount > 0) {
+        const oppIds = (linkedOpps?.data || []).map(o => o.id);
+        for (const oppId of oppIds) {
+          await supabase.query('opportunities', 'delete', {
+            id: oppId,
+            cache: false
+          });
+        }
+      }
+
+      // Delete leads
+      if (leadsCount > 0) {
+        const leadIds = (linkedLeads?.data || []).map(l => l.id);
+        for (const leadId of leadIds) {
+          // Delete lead child records first
+          await supabase.query('lead_scores', 'delete', {
+            query: { lead_id: leadId },
+            cache: false
+          });
+          await supabase.query('lead_history', 'delete', {
+            query: { lead_id: leadId },
+            cache: false
+          });
+          await supabase.query('lead_uploads', 'delete', {
+            query: { lead_id: leadId },
+            cache: false
+          });
+
+          // Delete the lead
+          await supabase.query('leads', 'delete', {
+            id: leadId,
+            cache: false
+          });
+        }
+      }
+    }
+
+    // Delete the contact
+    const { error } = await supabase.query('contacts', 'delete', {
+      id,
+      cache: false
+    });
+
     if (error) {
       return reply.code(500).send({ error: 'Database error', message: error.message });
     }
+
     return reply.code(204).send();
   });
 

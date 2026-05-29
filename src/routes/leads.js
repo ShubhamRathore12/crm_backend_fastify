@@ -50,6 +50,85 @@ async function leadsRoutes(fastify, opts) {
     return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
   });
 
+  // ─── GET /:id/upload-history ─────────────────────────────────────
+  fastify.get('/:id/upload-history', {
+    schema: {
+      tags: ['Leads'],
+      summary: 'Get lead upload history',
+      params: {
+        type: 'object',
+        properties: { id: { type: 'string', format: 'uuid' } },
+        required: ['id'],
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          page: { type: 'integer', minimum: 1, default: 1 },
+          limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          action: { type: 'string', enum: ['created', 'updated', 'skipped'] },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { id } = request.params;
+    const { page = 1, limit = 20, action } = request.query;
+    const offset = (page - 1) * limit;
+
+    let query = supabase
+      .from('lead_uploads')
+      .select('*', { count: 'exact' })
+      .eq('lead_id', id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (action) query = query.eq('action', action);
+
+    const { data, error, count } = await query;
+
+    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+    return reply.send({
+      data: data || [],
+      pagination: { total: count, page, limit, pages: Math.ceil((count || 0) / limit) },
+    });
+  });
+
+  // ─── GET /upload-history/bulk/:bulkUploadId ──────────────────────
+  fastify.get('/upload-history/bulk/:bulkUploadId', {
+    schema: {
+      tags: ['Leads'],
+      summary: 'Get upload history for a bulk upload',
+      params: {
+        type: 'object',
+        properties: { bulkUploadId: { type: 'string', format: 'uuid' } },
+        required: ['bulkUploadId'],
+      },
+      querystring: {
+        type: 'object',
+        properties: {
+          page: { type: 'integer', minimum: 1, default: 1 },
+          limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const { bulkUploadId } = request.params;
+    const { page = 1, limit = 20 } = request.query;
+    const offset = (page - 1) * limit;
+
+    const { data, error, count } = await supabase
+      .from('lead_uploads')
+      .select('*', { count: 'exact' })
+      .eq('bulk_upload_id', bulkUploadId)
+      .order('row_number', { ascending: true })
+      .range(offset, offset + limit - 1);
+
+    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+    return reply.send({
+      data: data || [],
+      pagination: { total: count, page, limit, pages: Math.ceil((count || 0) / limit) },
+    });
+  });
+
   // ─── GET /scoring-factors ────────────────────────────────────────
   fastify.get('/scoring-factors', {
     schema: { tags: ['Leads'], summary: 'List scoring factors' },

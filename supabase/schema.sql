@@ -70,6 +70,26 @@ CREATE TRIGGER contacts_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================================
+-- LEAD UPLOADS HISTORY
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.lead_uploads (
+  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  bulk_upload_id  UUID NOT NULL REFERENCES public.bulk_uploads(id) ON DELETE CASCADE,
+  lead_id         UUID NOT NULL REFERENCES public.leads(id) ON DELETE CASCADE,
+  source_file     TEXT NOT NULL,
+  row_number      INTEGER NOT NULL,
+  action          TEXT NOT NULL CHECK (action IN ('created', 'updated', 'skipped')),
+  data_before     JSONB,
+  data_after      JSONB NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS lead_uploads_bulk_upload_id_idx ON public.lead_uploads (bulk_upload_id);
+CREATE INDEX IF NOT EXISTS lead_uploads_lead_id_idx ON public.lead_uploads (lead_id);
+CREATE INDEX IF NOT EXISTS lead_uploads_created_at_idx ON public.lead_uploads (created_at DESC);
+CREATE INDEX IF NOT EXISTS lead_uploads_action_idx ON public.lead_uploads (action);
+
+-- ============================================================
 -- TEMPLATES
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.templates (
