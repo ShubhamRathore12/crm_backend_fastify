@@ -217,6 +217,207 @@ INSERT INTO public.provider_stats (provider, date, sent_count, bounce_count, com
 ('mailgun', CURRENT_DATE, 55, 0, 0, 54, 22, 5);
 
 -- ============================================================
+-- USERS - Team members
+-- ============================================================
+INSERT INTO public.users (id, email, name, avatar_url, role, status) VALUES
+('u1000001-0000-0000-0000-000000000001', 'jane.smith@company.com', 'Jane Smith', 'https://i.pravatar.cc/150?img=1', 'manager', 'active'),
+('u1000001-0000-0000-0000-000000000002', 'mike.johnson@company.com', 'Mike Johnson', 'https://i.pravatar.cc/150?img=2', 'user', 'active'),
+('u1000001-0000-0000-0000-000000000003', 'sarah.williams@company.com', 'Sarah Williams', 'https://i.pravatar.cc/150?img=3', 'user', 'active'),
+('u1000001-0000-0000-0000-000000000004', 'admin.user@company.com', 'Admin User', 'https://i.pravatar.cc/150?img=4', 'admin', 'active'),
+('u1000001-0000-0000-0000-000000000005', 'david.brown@company.com', 'David Brown', 'https://i.pravatar.cc/150?img=5', 'user', 'active');
+
+-- ============================================================
+-- LEADS - Sample leads with full details
+-- ============================================================
+INSERT INTO public.leads (id, name, email, phone, company, source, stage, status, lead_score, description, linkedin_url, website, industry, employee_count, assigned_to, created_at, updated_at) VALUES
+
+-- Lead 1: Hot prospect - ready for demo
+('l1000001-0000-0000-0000-000000000001', 'Rahul Sharma', 'rahul.sharma@techcorp.in', '+91-9876543210', 'TechCorp India', 'campaign', 'proposal', 'qualified', 92.5,
+'VP of Sales at TechCorp India. Very interested in our enterprise solution. Met at tech conference.', 'https://linkedin.com/in/rahul-sharma-123', 'https://techcorp.in', 'Technology', '5000+',
+'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '45 days', NOW() - INTERVAL '2 days'),
+
+-- Lead 2: Warm lead - in discovery phase
+('l1000001-0000-0000-0000-000000000002', 'Priya Patel', 'priya.patel@infosys.com', '+91-9876543211', 'Infosys', 'referral', 'discovery', 'contacted', 76.3,
+'Engineering manager at Infosys. Referred by existing customer. Has budget available.', 'https://linkedin.com/in/priya-patel-456', 'https://infosys.com', 'IT Services', '2000+',
+'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '30 days', NOW() - INTERVAL '5 days'),
+
+-- Lead 3: High-value opportunity
+('l1000001-0000-0000-0000-000000000003', 'Amit Kumar', 'amit.kumar@wipro.com', '+91-9876543212', 'Wipro', 'import', 'negotiation', 'qualified', 88.7,
+'Director of Technology at Wipro. Looking for enterprise CRM solution for 500+ users. Large deal potential.', 'https://linkedin.com/in/amit-kumar-789', 'https://wipro.com', 'IT Services', '10000+',
+'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '60 days', NOW() - INTERVAL '1 day'),
+
+-- Lead 4: New lead - just joined
+('l1000001-0000-0000-0000-000000000004', 'Sneha Reddy', 'sneha.reddy@tcs.com', '+91-9876543213', 'TCS', 'form', 'new', 'new', 45.2,
+'Program manager at TCS. Downloaded pricing guide. No prior contact.', 'https://linkedin.com/in/sneha-reddy-012', 'https://tcs.com', 'IT Services', '5000+',
+'u1000001-0000-0000-0000-000000000003', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days'),
+
+-- Lead 5: Cold lead - low score
+('l1000001-0000-0000-0000-000000000005', 'Vikram Singh', 'vikram.singh@hcl.com', '+91-9876543214', 'HCL Technologies', 'manual', 'new', 'cold', 32.1,
+'SVP at HCL. Not actively looking. Sent generic email. Low engagement.', 'https://linkedin.com/in/vikram-singh-345', 'https://hcl.com', 'IT Services', '5000+',
+'u1000001-0000-0000-0000-000000000005', NOW() - INTERVAL '90 days', NOW() - INTERVAL '45 days'),
+
+-- Lead 6: Just converted from opportunity
+('l1000001-0000-0000-0000-000000000006', 'Anita Desai', 'anita.desai@reliance.com', '+91-9876543215', 'Reliance Industries', 'campaign', 'closed', 'converted', 95.8,
+'GM Digital at Reliance. Just signed contract for implementation. Excellent client profile.', 'https://linkedin.com/in/anita-desai-678', 'https://reliance.com', 'Energy', '10000+',
+'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '120 days', NOW() - INTERVAL '1 day'),
+
+-- Lead 7: Lost opportunity
+('l1000001-0000-0000-0000-000000000007', 'Rajesh Gupta', 'rajesh.gupta@tatamotors.com', '+91-9876543216', 'Tata Motors', 'api', 'closed', 'lost', 58.4,
+'Head of IT at Tata Motors. Chose competitor solution. Budget constraints mentioned.', 'https://linkedin.com/in/rajesh-gupta-901', 'https://tatamotors.com', 'Automotive', '5000+',
+'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '75 days', NOW() - INTERVAL '10 days'),
+
+-- Lead 8: Unqualified lead
+('l1000001-0000-0000-0000-000000000008', 'Meera Nair', 'meera.nair@flipkart.com', '+91-9876543217', 'Flipkart', 'form', 'discovery', 'unqualified', 38.9,
+'Product lead at Flipkart. Wrong department - needs to be forwarded to procurement. Not a fit for our solution.', 'https://linkedin.com/in/meera-nair-234', 'https://flipkart.com', 'E-Commerce', '1000+',
+NULL, NOW() - INTERVAL '15 days', NOW() - INTERVAL '5 days'),
+
+-- Lead 9: International prospect
+('l1000001-0000-0000-0000-000000000009', 'John Smith', 'john.smith@acmecorp.com', '+1-555-0101', 'Acme Corporation', 'campaign', 'proposal', 'qualified', 81.5,
+'CEO at Acme Corp USA. Met at SaaS conference. Interested in pilot program. 30-day trial arranged.', 'https://linkedin.com/in/john-smith-567', 'https://acmecorp.com', 'Manufacturing', '500-1000',
+'u1000001-0000-0000-0000-000000000004', NOW() - INTERVAL '40 days', NOW() - INTERVAL '3 days'),
+
+-- Lead 10: High-touch account
+('l1000001-0000-0000-0000-000000000010', 'Sarah Johnson', 'sarah.johnson@globaltech.com', '+1-555-0102', 'GlobalTech Solutions', 'referral', 'negotiation', 'qualified', 89.3,
+'VP Sales at GlobalTech. Referred by partner. Complex deal with multiple stakeholders. Legal review in progress.', 'https://linkedin.com/in/sarah-johnson-890', 'https://globaltech.com', 'Technology', '100-500',
+'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '55 days', NOW() - INTERVAL '2 days');
+
+-- ============================================================
+-- LEAD SCORES - Historical scoring data
+-- ============================================================
+INSERT INTO public.lead_scores (id, lead_id, score, confidence, factors, prediction, created_at) VALUES
+
+('s1000001-0000-0000-0000-000000000001', 'l1000001-0000-0000-0000-000000000001', 92.5, 0.95, 
+'{"engagement": 0.95, "firmographic": 0.90, "intent": 0.98, "budget": 0.88}', 'likely', NOW() - INTERVAL '2 days'),
+('s1000001-0000-0000-0000-000000000001', 'l1000001-0000-0000-0000-000000000001', 85.3, 0.87, 
+'{"engagement": 0.85, "firmographic": 0.88, "intent": 0.90, "budget": 0.78}', 'likely', NOW() - INTERVAL '10 days'),
+
+('s1000001-0000-0000-0000-000000000002', 'l1000001-0000-0000-0000-000000000002', 76.3, 0.82,
+'{"engagement": 0.75, "firmographic": 0.85, "intent": 0.72, "budget": 0.75}', 'likely', NOW() - INTERVAL '5 days'),
+('s1000001-0000-0000-0000-000000000002', 'l1000001-0000-0000-0000-000000000002', 68.1, 0.78,
+'{"engagement": 0.65, "firmographic": 0.80, "intent": 0.60, "budget": 0.68}', 'maybe', NOW() - INTERVAL '15 days'),
+
+('s1000001-0000-0000-0000-000000000003', 'l1000001-0000-0000-0000-000000000003', 88.7, 0.91,
+'{"engagement": 0.92, "firmographic": 0.92, "intent": 0.88, "budget": 0.85}', 'likely', NOW() - INTERVAL '1 day'),
+
+('s1000001-0000-0000-0000-000000000006', 'l1000001-0000-0000-0000-000000000006', 95.8, 0.98,
+'{"engagement": 0.98, "firmographic": 0.95, "intent": 0.98, "budget": 0.98}', 'likely', NOW() - INTERVAL '1 day');
+
+-- ============================================================
+-- LEAD HISTORY - Track changes
+-- ============================================================
+INSERT INTO public.lead_history (id, lead_id, action, field_changed, old_value, new_value, reason, notes, timestamp, changed_by) VALUES
+
+('h1000001-0000-0000-0000-000000000001', 'l1000001-0000-0000-0000-000000000001', 'created', NULL, NULL, NULL, 'Initial import from campaign', 'Lead from email campaign', NOW() - INTERVAL '45 days', 'u1000001-0000-0000-0000-000000000004'),
+('h1000001-0000-0000-0000-000000000002', 'l1000001-0000-0000-0000-000000000001', 'status_updated', 'status', 'new', 'contacted', 'Initial outreach completed', 'Sent intro email, received response', NOW() - INTERVAL '40 days', 'u1000001-0000-0000-0000-000000000001'),
+('h1000001-0000-0000-0000-000000000003', 'l1000001-0000-0000-0000-000000000001', 'stage_updated', 'stage', 'new', 'discovery', 'Moved to discovery phase', 'Scheduled initial call', NOW() - INTERVAL '35 days', 'u1000001-0000-0000-0000-000000000001'),
+('h1000001-0000-0000-0000-000000000004', 'l1000001-0000-0000-0000-000000000001', 'status_updated', 'status', 'contacted', 'qualified', 'Customer showed strong interest', 'Completed discovery call, now moving to proposal', NOW() - INTERVAL '20 days', 'u1000001-0000-0000-0000-000000000001'),
+('h1000001-0000-0000-0000-000000000005', 'l1000001-0000-0000-0000-000000000001', 'stage_updated', 'stage', 'discovery', 'proposal', 'Creating customized proposal', 'Based on discovery call findings', NOW() - INTERVAL '18 days', 'u1000001-0000-0000-0000-000000000001'),
+('h1000001-0000-0000-0000-000000000006', 'l1000001-0000-0000-0000-000000000001', 'assigned', NULL, NULL, 'u1000001-0000-0000-0000-000000000001', 'Assigned to Jane for management', NULL, NOW() - INTERVAL '45 days', 'u1000001-0000-0000-0000-000000000004'),
+
+('h1000001-0000-0000-0000-000000000007', 'l1000001-0000-0000-0000-000000000002', 'created', NULL, NULL, NULL, 'Referral from existing customer', 'John recommended this contact', NOW() - INTERVAL '30 days', 'u1000001-0000-0000-0000-000000000001'),
+('h1000001-0000-0000-0000-000000000008', 'l1000001-0000-0000-0000-000000000002', 'status_updated', 'status', 'new', 'contacted', 'Sent intro email', NULL, NOW() - INTERVAL '28 days', 'u1000001-0000-0000-0000-000000000002'),
+
+('h1000001-0000-0000-0000-000000000009', 'l1000001-0000-0000-0000-000000000006', 'created', NULL, NULL, NULL, 'Campaign signup', NULL, NOW() - INTERVAL '120 days', 'u1000001-0000-0000-0000-000000000004'),
+('h1000001-0000-0000-0000-000000000010', 'l1000001-0000-0000-0000-000000000006', 'status_updated', 'status', 'new', 'converted', 'Contract signed', 'Implementation scheduled for next month', NOW() - INTERVAL '1 day', 'u1000001-0000-0000-0000-000000000001'),
+
+('h1000001-0000-0000-0000-000000000011', 'l1000001-0000-0000-0000-000000000007', 'created', NULL, NULL, NULL, 'API import from CRM', NULL, NOW() - INTERVAL '75 days', 'u1000001-0000-0000-0000-000000000004'),
+('h1000001-0000-0000-0000-000000000012', 'l1000001-0000-0000-0000-000000000007', 'status_updated', 'status', 'new', 'lost', 'Chose competitor', 'Budget constraints and existing vendor lock-in', NOW() - INTERVAL '10 days', 'u1000001-0000-0000-0000-000000000002');
+
+-- ============================================================
+-- LEAD NOTES - Add team notes
+-- ============================================================
+INSERT INTO public.lead_notes (id, lead_id, content, type, created_by, created_at) VALUES
+
+('n1000001-0000-0000-0000-000000000001', 'l1000001-0000-0000-0000-000000000001', 'Rahul mentioned they have 50 potential users. Very engaged during the call. Asked about API capabilities.', 'general', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '18 days'),
+('n1000001-0000-0000-0000-000000000002', 'l1000001-0000-0000-0000-000000000001', 'IMPORTANT: CFO needs to approve any contract above $100k. Rahul will set up meeting.', 'internal', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '16 days'),
+('n1000001-0000-0000-0000-000000000003', 'l1000001-0000-0000-0000-000000000001', 'Follow up: Need to send pricing options and SSO documentation by Friday.', 'follow_up', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '12 days'),
+('n1000001-0000-0000-0000-000000000004', 'l1000001-0000-0000-0000-000000000001', 'Proposal sent on Tuesday. Waiting for internal review feedback.', 'general', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '5 days'),
+
+('n1000001-0000-0000-0000-000000000005', 'l1000001-0000-0000-0000-000000000002', 'Priya is very interested but needs to get internal approvals. Budget cycle is Q2.', 'general', 'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '12 days'),
+('n1000001-0000-0000-0000-000000000006', 'l1000001-0000-0000-0000-000000000002', 'ACTION: Send case study from similar Infosys implementation', 'follow_up', 'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '8 days'),
+
+('n1000001-0000-0000-0000-000000000007', 'l1000001-0000-0000-0000-000000000006', 'Deal closed! Implementation team to be assigned next week.', 'general', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '1 day');
+
+-- ============================================================
+-- OPPORTUNITIES - Sales deals
+-- ============================================================
+INSERT INTO public.opportunities (id, lead_id, title, type, status, stage, value, probability, expected_closed_at, assigned_to, created_at, updated_at) VALUES
+
+('o1000001-0000-0000-0000-000000000001', 'l1000001-0000-0000-0000-000000000001', 'TechCorp Enterprise License - 100 seats', 'sales', 'open', 'proposal', 150000.00, 75, NOW() + INTERVAL '45 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '20 days', NOW() - INTERVAL '2 days'),
+('o1000001-0000-0000-0000-000000000002', 'l1000001-0000-0000-0000-000000000001', 'TechCorp Implementation Services', 'sales', 'open', 'proposal', 45000.00, 70, NOW() + INTERVAL '60 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '15 days', NOW() - INTERVAL '2 days'),
+
+('o1000001-0000-0000-0000-000000000003', 'l1000001-0000-0000-0000-000000000002', 'Infosys CRM License - 50 seats', 'sales', 'open', 'discovery', 50000.00, 50, NOW() + INTERVAL '90 days', 'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '25 days', NOW() - INTERVAL '8 days'),
+
+('o1000001-0000-0000-0000-000000000004', 'l1000001-0000-0000-0000-000000000003', 'Wipro Enterprise Suite - 500 seats', 'sales', 'open', 'negotiation', 500000.00, 85, NOW() + INTERVAL '30 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '50 days', NOW() - INTERVAL '1 day'),
+('o1000001-0000-0000-0000-000000000005', 'l1000001-0000-0000-0000-000000000003', 'Wipro Premium Support - Annual', 'sales', 'open', 'negotiation', 75000.00, 80, NOW() + INTERVAL '35 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '48 days', NOW() - INTERVAL '1 day'),
+
+('o1000001-0000-0000-0000-000000000006', 'l1000001-0000-0000-0000-000000000006', 'Reliance Industries - Enterprise Implementation', 'sales', 'won', 'closed', 250000.00, 100, NOW() - INTERVAL '5 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '100 days', NOW() - INTERVAL '1 day'),
+
+('o1000001-0000-0000-0000-000000000007', 'l1000001-0000-0000-0000-000000000009', 'Acme Corp - Pilot Program (30 days)', 'sales', 'open', 'proposal', 25000.00, 70, NOW() + INTERVAL '35 days', 'u1000001-0000-0000-0000-000000000004', NOW() - INTERVAL '35 days', NOW() - INTERVAL '3 days'),
+
+('o1000001-0000-0000-0000-000000000008', 'l1000001-0000-0000-0000-000000000010', 'GlobalTech - Enterprise License + Implementation', 'sales', 'open', 'negotiation', 320000.00, 80, NOW() + INTERVAL '25 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '45 days', NOW() - INTERVAL '2 days');
+
+-- ============================================================
+-- TASKS - Follow-ups and activities
+-- ============================================================
+INSERT INTO public.tasks (id, subject, description, entity_type, entity_id, priority, status, due_date, assigned_to, created_at, updated_at) VALUES
+
+('t1000001-0000-0000-0000-000000000001', 'Schedule demo call with Rahul', 'Initial product demo for TechCorp team', 'lead', 'l1000001-0000-0000-0000-000000000001', 'high', 'completed', NOW() - INTERVAL '25 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '30 days', NOW() - INTERVAL '25 days'),
+('t1000001-0000-0000-0000-000000000002', 'Send customized proposal', 'Tailor proposal based on their 100-seat requirement', 'lead', 'l1000001-0000-0000-0000-000000000001', 'high', 'completed', NOW() - INTERVAL '15 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '18 days', NOW() - INTERVAL '15 days'),
+('t1000001-0000-0000-0000-000000000003', 'Follow up on proposal - check status', 'Contact Rahul about proposal review progress', 'lead', 'l1000001-0000-0000-0000-000000000001', 'high', 'open', NOW() + INTERVAL '3 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days'),
+('t1000001-0000-0000-0000-000000000004', 'Prepare CFO presentation slides', 'Create executive summary for CFO approval', 'lead', 'l1000001-0000-0000-0000-000000000001', 'urgent', 'open', NOW() + INTERVAL '7 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days'),
+
+('t1000001-0000-0000-0000-000000000005', 'Initial call with Priya', 'Discovery call to understand Infosys needs', 'lead', 'l1000001-0000-0000-0000-000000000002', 'high', 'completed', NOW() - INTERVAL '20 days', 'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '25 days', NOW() - INTERVAL '20 days'),
+('t1000001-0000-0000-0000-000000000006', 'Send case study - similar implementation', 'Case study from comparable Infosys project', 'lead', 'l1000001-0000-0000-0000-000000000002', 'normal', 'open', NOW() + INTERVAL '5 days', 'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '8 days', NOW() - INTERVAL '8 days'),
+
+('t1000001-0000-0000-0000-000000000007', 'Send discovery questionnaire', 'Get detailed requirements for Wipro', 'lead', 'l1000001-0000-0000-0000-000000000003', 'high', 'completed', NOW() - INTERVAL '40 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '45 days', NOW() - INTERVAL '40 days'),
+('t1000001-0000-0000-0000-000000000008', 'Executive steering committee meeting', 'Present solution to Wipro executive team', 'lead', 'l1000001-0000-0000-0000-000000000003', 'urgent', 'open', NOW() + INTERVAL '10 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days'),
+
+('t1000001-0000-0000-0000-000000000009', 'Onboarding kickoff meeting', 'Implementation kickoff with Reliance team', 'lead', 'l1000001-0000-0000-0000-000000000006', 'high', 'open', NOW() + INTERVAL '8 days', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days'),
+
+('t1000001-0000-0000-0000-000000000010', 'Prepare Acme pilot demo', 'Setup pilot environment for 30-day trial', 'lead', 'l1000001-0000-0000-0000-000000000009', 'high', 'open', NOW() + INTERVAL '5 days', 'u1000001-0000-0000-0000-000000000004', NOW() - INTERVAL '10 days', NOW() - INTERVAL '10 days');
+
+-- ============================================================
+-- EMAIL SENDS - Communication history
+-- ============================================================
+INSERT INTO public.email_sends (id, campaign_id, entity_type, entity_id, to_email, subject, status, read_at, clicked_at, created_at, updated_at) VALUES
+
+('e1000001-0000-0000-0000-000000000001', 'c3000001-0000-0000-0000-000000000001', 'lead', 'l1000001-0000-0000-0000-000000000001', 'rahul.sharma@techcorp.in', 'Introducing CRM Pro - Your Sales Superpower', 'opened', NOW() - INTERVAL '40 days', NOW() - INTERVAL '39 days', NOW() - INTERVAL '42 days', NOW() - INTERVAL '40 days'),
+('e1000001-0000-0000-0000-000000000002', NULL, 'lead', 'l1000001-0000-0000-0000-000000000001', 'rahul.sharma@techcorp.in', 'Quick follow-up: Let''s schedule your demo', 'opened', NOW() - INTERVAL '32 days', NULL, NOW() - INTERVAL '35 days', NOW() - INTERVAL '32 days'),
+('e1000001-0000-0000-0000-000000000003', NULL, 'lead', 'l1000001-0000-0000-0000-000000000001', 'rahul.sharma@techcorp.in', 'Your Customized Proposal - TechCorp Enterprise Package', 'opened', NOW() - INTERVAL '10 days', NOW() - INTERVAL '9 days', NOW() - INTERVAL '15 days', NOW() - INTERVAL '10 days'),
+('e1000001-0000-0000-0000-000000000004', NULL, 'lead', 'l1000001-0000-0000-0000-000000000001', 'rahul.sharma@techcorp.in', 'Checking in: Proposal review status?', 'sent', NULL, NULL, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days'),
+
+('e1000001-0000-0000-0000-000000000005', 'c3000001-0000-0000-0000-000000000001', 'lead', 'l1000001-0000-0000-0000-000000000002', 'priya.patel@infosys.com', 'Introducing CRM Pro - Your Sales Superpower', 'opened', NOW() - INTERVAL '40 days', NULL, NOW() - INTERVAL '42 days', NOW() - INTERVAL '40 days'),
+('e1000001-0000-0000-0000-000000000006', NULL, 'lead', 'l1000001-0000-0000-0000-000000000002', 'priya.patel@infosys.com', 'Let''s connect: Quick intro call?', 'opened', NOW() - INTERVAL '25 days', NULL, NOW() - INTERVAL '28 days', NOW() - INTERVAL '25 days'),
+
+('e1000001-0000-0000-0000-000000000007', 'c3000001-0000-0000-0000-000000000001', 'lead', 'l1000001-0000-0000-0000-000000000003', 'amit.kumar@wipro.com', 'Introducing CRM Pro - Your Sales Superpower', 'opened', NOW() - INTERVAL '42 days', NOW() - INTERVAL '41 days', NOW() - INTERVAL '44 days', NOW() - INTERVAL '42 days'),
+('e1000001-0000-0000-0000-000000000008', NULL, 'lead', 'l1000001-0000-0000-0000-000000000003', 'amit.kumar@wipro.com', 'Discovery: Understanding Wipro''s requirements', 'delivered', NULL, NULL, NOW() - INTERVAL '38 days', NOW() - INTERVAL '38 days'),
+
+('e1000001-0000-0000-0000-000000000009', 'c3000001-0000-0000-0000-000000000001', 'lead', 'l1000001-0000-0000-0000-000000000006', 'anita.desai@reliance.com', 'Introducing CRM Pro - Your Sales Superpower', 'opened', NOW() - INTERVAL '100 days', NOW() - INTERVAL '99 days', NOW() - INTERVAL '102 days', NOW() - INTERVAL '100 days'),
+('e1000001-0000-0000-0000-000000000010', NULL, 'lead', 'l1000001-0000-0000-0000-000000000006', 'anita.desai@reliance.com', 'Contract Signed - Implementation Begins!', 'opened', NOW() - INTERVAL '1 day', NULL, NOW() - INTERVAL '2 days', NOW() - INTERVAL '1 day');
+
+-- ============================================================
+-- INTERACTIONS - Phone calls, meetings, etc
+-- ============================================================
+INSERT INTO public.interactions (id, lead_id, channel, subject, status, priority, assigned_to, last_activity_at, created_at, updated_at) VALUES
+
+('i1000001-0000-0000-0000-000000000001', 'l1000001-0000-0000-0000-000000000001', 'phone', 'Initial discovery call with Rahul', 'completed', 'high', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '30 days', NOW() - INTERVAL '32 days', NOW() - INTERVAL '30 days'),
+('i1000001-0000-0000-0000-000000000002', 'l1000001-0000-0000-0000-000000000001', 'meeting', 'Product demo presentation', 'completed', 'high', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '25 days', NOW() - INTERVAL '28 days', NOW() - INTERVAL '25 days'),
+('i1000001-0000-0000-0000-000000000003', 'l1000001-0000-0000-0000-000000000001', 'phone', 'Proposal discussion with Rahul', 'completed', 'high', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '12 days', NOW() - INTERVAL '15 days', NOW() - INTERVAL '12 days'),
+('i1000001-0000-0000-0000-000000000004', 'l1000001-0000-0000-0000-000000000001', 'email', 'Ongoing email discussions', 'open', 'normal', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '2 days', NOW() - INTERVAL '10 days', NOW() - INTERVAL '2 days'),
+
+('i1000001-0000-0000-0000-000000000005', 'l1000001-0000-0000-0000-000000000002', 'phone', 'Initial call with Priya', 'completed', 'high', 'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '20 days', NOW() - INTERVAL '25 days', NOW() - INTERVAL '20 days'),
+('i1000001-0000-0000-0000-000000000006', 'l1000001-0000-0000-0000-000000000002', 'email', 'Email follow-up discussion', 'open', 'normal', 'u1000001-0000-0000-0000-000000000002', NOW() - INTERVAL '8 days', NOW() - INTERVAL '12 days', NOW() - INTERVAL '8 days'),
+
+('i1000001-0000-0000-0000-000000000007', 'l1000001-0000-0000-0000-000000000003', 'meeting', 'Executive steering committee meeting', 'open', 'urgent', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '5 days', NOW() - INTERVAL '50 days', NOW() - INTERVAL '5 days'),
+
+('i1000001-0000-0000-0000-000000000008', 'l1000001-0000-0000-0000-000000000006', 'meeting', 'Deal closing celebration', 'completed', 'normal', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '2 days', NOW() - INTERVAL '3 days', NOW() - INTERVAL '2 days'),
+
+('i1000001-0000-0000-0000-000000000009', 'l1000001-0000-0000-0000-000000000009', 'meeting', 'Pilot program kickoff meeting', 'open', 'high', 'u1000001-0000-0000-0000-000000000004', NOW() - INTERVAL '8 days', NOW() - INTERVAL '35 days', NOW() - INTERVAL '8 days'),
+
+('i1000001-0000-0000-0000-000000000010', 'l1000001-0000-0000-0000-000000000010', 'phone', 'Initial discovery with GlobalTech', 'completed', 'high', 'u1000001-0000-0000-0000-000000000001', NOW() - INTERVAL '40 days', NOW() - INTERVAL '45 days', NOW() - INTERVAL '40 days');
+
+-- ============================================================
 -- API KEYS - Sample API key (hash of 'crm_test_key_12345')
 -- ============================================================
 INSERT INTO public.api_keys (account_id, name, key_hash, scopes, active) VALUES
@@ -240,5 +441,17 @@ UPDATE public.campaigns SET
   started_at = NOW() - INTERVAL '2 days'
 WHERE id = 'c3000001-0000-0000-0000-000000000004';
 
--- Done!
-SELECT 'Seed data loaded successfully!' AS status;
+-- ============================================================
+-- SEED DATA SUMMARY
+-- ============================================================
+SELECT 
+  'Seed data loaded successfully!' AS status,
+  (SELECT COUNT(*) FROM public.users) AS users_count,
+  (SELECT COUNT(*) FROM public.leads) AS leads_count,
+  (SELECT COUNT(*) FROM public.lead_scores) AS lead_scores_count,
+  (SELECT COUNT(*) FROM public.lead_history) AS lead_history_count,
+  (SELECT COUNT(*) FROM public.lead_notes) AS lead_notes_count,
+  (SELECT COUNT(*) FROM public.opportunities) AS opportunities_count,
+  (SELECT COUNT(*) FROM public.tasks) AS tasks_count,
+  (SELECT COUNT(*) FROM public.email_sends) AS email_sends_count,
+  (SELECT COUNT(*) FROM public.interactions) AS interactions_count;
