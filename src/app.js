@@ -93,11 +93,13 @@ async function buildApp() {
   await app.register(cors, {
     origin: process.env.CORS_ORIGIN
       ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-      : true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+      : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:5173'], // Development defaults
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Accept', 'Accept-Language', 'Content-Language'],
+    exposedHeaders: ['X-Total-Count', 'X-Page-Count', 'Content-Length'],
     credentials: true,
     maxAge: 86400,
+    preflightContinue: false,
   });
 
   // Compression (gzip/brotli)
