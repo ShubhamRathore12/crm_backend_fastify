@@ -163,9 +163,18 @@ async function analyticsRoutes(fastify, options) {
     const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
 
     const [leadsResult, scoresResult, historyResult] = await Promise.all([
-      supabase.from('leads').select('id, source, status, stage, assigned_to, created_at').gte('created_at', since),
-      supabase.from('lead_scores').select('score, confidence').gte('created_at', since),
-      supabase.from('lead_history').select('status, timestamp').gte('timestamp', since),
+      supabase.query('leads', 'select', {
+        select: 'id, source, status, stage, assigned_to, created_at',
+        query: { created_at: { $gte: since } }
+      }),
+      supabase.query('lead_scores', 'select', {
+        select: 'score, confidence',
+        query: { created_at: { $gte: since } }
+      }),
+      supabase.query('lead_history', 'select', {
+        select: 'status, timestamp',
+        query: { timestamp: { $gte: since } }
+      }),
     ]);
 
     const leads = leadsResult.data || [];
@@ -204,10 +213,11 @@ async function analyticsRoutes(fastify, options) {
     const { days = 30 } = request.query;
     const since = new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
 
-    const { data: opps } = await supabase
-      .from('opportunities')
-      .select('id, stage, value, probability, currency, created_at')
-      .gte('created_at', since);
+    const oppsResult = await supabase.query('opportunities', 'select', {
+      select: 'id, stage, value, probability, currency, created_at',
+      query: { created_at: { $gte: since } }
+    });
+    const opps = oppsResult.data;
 
     const opportunities = opps || [];
     const pipeline = {};

@@ -81,42 +81,73 @@ class OptimizedSupabaseClient {
       this.metrics.cacheMisses++;
     }
 
-    let queryBuilder = this.client.from(table);
-
-    // Apply query operations
-    if (options.query) {
-      Object.entries(options.query).forEach(([key, value]) => {
-        if (Array.isArray(value)) {
-          queryBuilder = queryBuilder.in(key, value);
-        } else if (typeof value === 'object' && value !== null) {
-          if (value.$eq) queryBuilder = queryBuilder.eq(key, value.$eq);
-          if (value.$neq) queryBuilder = queryBuilder.neq(key, value.$neq);
-          if (value.$gt) queryBuilder = queryBuilder.gt(key, value.$gt);
-          if (value.$gte) queryBuilder = queryBuilder.gte(key, value.$gte);
-          if (value.$lt) queryBuilder = queryBuilder.lt(key, value.$lt);
-          if (value.$lte) queryBuilder = queryBuilder.lte(key, value.$lte);
-          if (value.$like) queryBuilder = queryBuilder.like(key, value.$like);
-          if (value.$ilike) queryBuilder = queryBuilder.ilike(key, value.$ilike);
-          if (value.$in) queryBuilder = queryBuilder.in(key, value.$in);
-          if (value.$is) queryBuilder = queryBuilder.is(key, value.$is);
-        } else {
-          queryBuilder = queryBuilder.eq(key, value);
-        }
-      });
-    }
-
-    // Apply select, order, limit, offset
-    if (options.select) queryBuilder = queryBuilder.select(options.select);
-    if (options.order) queryBuilder = queryBuilder.order(options.order.column, { ascending: options.order.ascending !== false });
-    if (options.limit) queryBuilder = queryBuilder.limit(options.limit);
-    if (options.offset) queryBuilder = queryBuilder.range(options.offset, options.offset + (options.limit || 1) - 1);
-
     let result;
     try {
       switch (operation) {
-        case 'select':
+        case 'select': {
+          let queryBuilder = this.client.from(table).select(options.select || '*');
+          
+          // Apply filters
+          if (options.query) {
+            // Handle $or operator
+            if (options.query.$or && Array.isArray(options.query.$or)) {
+              const orFilters = options.query.$or.map(condition => {
+                let filterStr = '';
+                for (const [key, val] of Object.entries(condition)) {
+                  if (typeof val === 'object' && val !== null) {
+                    if (val.$ilike !== undefined) {
+                      filterStr += `${key}.ilike.${encodeURIComponent(val.$ilike)},`;
+                    } else if (val.$like !== undefined) {
+                      filterStr += `${key}.like.${encodeURIComponent(val.$like)},`;
+                    } else if (val.$eq !== undefined) {
+                      filterStr += `${key}.eq.${encodeURIComponent(val.$eq)},`;
+                    }
+                  }
+                }
+                return filterStr.slice(0, -1);
+              }).join(',');
+              queryBuilder = queryBuilder.or(orFilters);
+            } else {
+              // Apply regular filters
+              for (const [key, value] of Object.entries(options.query)) {
+                if (value === null) {
+                  queryBuilder = queryBuilder.is(key, null);
+                } else if (Array.isArray(value)) {
+                  queryBuilder = queryBuilder.in(key, value);
+                } else if (typeof value === 'object' && value !== null) {
+                  if (value.$eq !== undefined) queryBuilder = queryBuilder.eq(key, value.$eq);
+                  if (value.$neq !== undefined) queryBuilder = queryBuilder.neq(key, value.$neq);
+                  if (value.$gt !== undefined) queryBuilder = queryBuilder.gt(key, value.$gt);
+                  if (value.$gte !== undefined) queryBuilder = queryBuilder.gte(key, value.$gte);
+                  if (value.$lt !== undefined) queryBuilder = queryBuilder.lt(key, value.$lt);
+                  if (value.$lte !== undefined) queryBuilder = queryBuilder.lte(key, value.$lte);
+                  if (value.$like !== undefined) queryBuilder = queryBuilder.like(key, value.$like);
+                  if (value.$ilike !== undefined) queryBuilder = queryBuilder.ilike(key, value.$ilike);
+                  if (value.$in !== undefined) queryBuilder = queryBuilder.in(key, value.$in);
+                  if (value.$is !== undefined) queryBuilder = queryBuilder.is(key, value.$is);
+                } else {
+                  queryBuilder = queryBuilder.eq(key, value);
+                }
+              }
+            }
+          }
+          
+          // Apply ordering
+          if (options.order) {
+            const ascending = options.order.ascending !== false;
+            queryBuilder = queryBuilder.order(options.order.column, { ascending });
+          }
+          
+          // Apply pagination
+          if (options.limit || options.offset) {
+            const offset = options.offset || 0;
+            const limit = options.limit || 1;
+            queryBuilder = queryBuilder.range(offset, offset + limit - 1);
+          }
+          
           result = await queryBuilder;
           break;
+        }
         case 'insert':
           result = await this.client.from(table).insert(options.data).select();
           break;
@@ -126,14 +157,16 @@ class OptimizedSupabaseClient {
         case 'delete':
           result = await this.client.from(table).delete().eq('id', options.id);
           break;
-        case 'count':
-          result = await queryBuilder.select('*', { count: 'exact', head: true });
+        case 'count': {
+          const queryBuilder = this.client.from(table).select('*', { count: 'exact', head: true });
+          result = await queryBuilder;
           break;
+        }
         default:
           throw new Error(`Unsupported operation: ${operation}`);
       }
     } catch (error) {
-      console.error(`[Database] Query error on ${table}:`, error.message);
+      console.error(`[Database] Query error on ${table}:`, error.message, error.stack);
       throw error;
     }
 
@@ -152,7 +185,7 @@ class OptimizedSupabaseClient {
   /**
    * Batch multiple operations in a single transaction
    */
-  async batch(operations) {
+  async batchOperations(operations) {
     const startTime = Date.now();
     
     // Group by table for optimization

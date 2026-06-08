@@ -66,7 +66,7 @@ async function contactsRoutes(fastify, options) {
     const { page = 1, limit = 50, search, ucc_code, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
-    const { data, error, count } = await supabase.query('contacts', 'select', {
+    const result = await supabase.query('contacts', 'select', {
       query: search ? {
         $or: [
           { email: { $ilike: `%${search}%` } },
@@ -83,18 +83,18 @@ async function contactsRoutes(fastify, options) {
       cache: true
     });
 
-    if (error) {
-      return reply.code(500).send({ error: 'Database error', message: error.message });
+    if (result.error) {
+      return reply.code(500).send({ error: 'Database error', message: result.error.message });
     }
 
     return reply.send({
-      data: data.data || [],
+      data: result.data || [],
       pagination: {
-        total: count || 0,
+        total: result.data ? result.data.length : 0,
         page,
         limit,
-        pages: Math.ceil((count || 0) / limit),
-        hasNext: offset + limit < (count || 0),
+        pages: Math.ceil((result.data ? result.data.length : 0) / limit),
+        hasNext: offset + limit < (result.data ? result.data.length : 0),
         hasPrev: page > 1,
       },
     });
@@ -537,7 +537,7 @@ async function contactsRoutes(fastify, options) {
       options: { id }
     }));
 
-    const results = await supabase.batch(deleteOperations);
+    const results = await supabase.batchOperations(deleteOperations);
     
     const deletedCount = results.filter(r => r.success).length;
     const errors = results.filter(r => !r.success);

@@ -410,7 +410,7 @@ function setupCronJobs(app) {
         }
       }));
 
-      await supabase.batch(updateOperations);
+      await supabase.batchOperations(updateOperations);
       
       app.log.info({ 
         completed: campaignsToComplete.length,
