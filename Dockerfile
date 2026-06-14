@@ -10,7 +10,7 @@ RUN apk add --no-cache curl
 # --- Dependencies stage ---
 FROM base AS deps
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # --- Development stage ---
 FROM base AS development

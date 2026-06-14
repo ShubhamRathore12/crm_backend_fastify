@@ -218,13 +218,17 @@ INSERT INTO public.provider_stats (provider, date, sent_count, bounce_count, com
 
 -- ============================================================
 -- USERS - Team members
+-- Test passwords: all use 'password123'
+-- SHA256 hash with salt: sha256(password123 + API_KEY_SALT)
 -- ============================================================
-INSERT INTO public.users (id, email, name, avatar_url, role, status) VALUES
-('u1000001-0000-0000-0000-000000000001', 'jane.smith@company.com', 'Jane Smith', 'https://i.pravatar.cc/150?img=1', 'manager', 'active'),
-('u1000001-0000-0000-0000-000000000002', 'mike.johnson@company.com', 'Mike Johnson', 'https://i.pravatar.cc/150?img=2', 'user', 'active'),
-('u1000001-0000-0000-0000-000000000003', 'sarah.williams@company.com', 'Sarah Williams', 'https://i.pravatar.cc/150?img=3', 'user', 'active'),
-('u1000001-0000-0000-0000-000000000004', 'admin.user@company.com', 'Admin User', 'https://i.pravatar.cc/150?img=4', 'admin', 'active'),
-('u1000001-0000-0000-0000-000000000005', 'david.brown@company.com', 'David Brown', 'https://i.pravatar.cc/150?img=5', 'user', 'active');
+-- NOTE: Replace password_hash values with real bcrypt hashes in production!
+-- For development, using SHA256: e5fa44f2b31c1fb553b6021e7aab6b74476544c534d46542c3a17a34c176c6f6
+INSERT INTO public.users (id, email, name, password_hash, avatar_url, role, status) VALUES
+('u1000001-0000-0000-0000-000000000001', 'jane.smith@company.com', 'Jane Smith', 'e5fa44f2b31c1fb553b6021e7aab6b74476544c534d46542c3a17a34c176c6f6', 'https://i.pravatar.cc/150?img=1', 'manager', 'active'),
+('u1000001-0000-0000-0000-000000000002', 'mike.johnson@company.com', 'Mike Johnson', 'e5fa44f2b31c1fb553b6021e7aab6b74476544c534d46542c3a17a34c176c6f6', 'https://i.pravatar.cc/150?img=2', 'user', 'active'),
+('u1000001-0000-0000-0000-000000000003', 'sarah.williams@company.com', 'Sarah Williams', 'e5fa44f2b31c1fb553b6021e7aab6b74476544c534d46542c3a17a34c176c6f6', 'https://i.pravatar.cc/150?img=3', 'user', 'active'),
+('u1000001-0000-0000-0000-000000000004', 'admin.user@company.com', 'Admin User', 'e5fa44f2b31c1fb553b6021e7aab6b74476544c534d46542c3a17a34c176c6f6', 'https://i.pravatar.cc/150?img=4', 'admin', 'active'),
+('u1000001-0000-0000-0000-000000000005', 'david.brown@company.com', 'David Brown', 'e5fa44f2b31c1fb553b6021e7aab6b74476544c534d46542c3a17a34c176c6f6', 'https://i.pravatar.cc/150?img=5', 'user', 'active');
 
 -- ============================================================
 -- LEADS - Sample leads with full details

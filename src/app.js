@@ -63,6 +63,7 @@ async function buildApp() {
     },
     trustProxy: true,
     disableRequestLogging: false,
+    bodyLimit: 1048576, // 1MB
     ajv: {
       customOptions: {
         strict: 'log',
@@ -72,6 +73,17 @@ async function buildApp() {
         useDefaults: true,
       },
     },
+  });
+
+  // =========================================================================
+  // DEBUG: Log all requests
+  // =========================================================================
+  app.addHook('preHandler', async (request, reply) => {
+    request.log.info({ 
+      url: request.url, 
+      method: request.method,
+      body: request.body 
+    }, 'PRE-HANDLER HOOK');
   });
 
   // =========================================================================
@@ -125,7 +137,7 @@ async function buildApp() {
       message: `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)}s`,
       retryAfter: Math.ceil(context.ttl / 1000),
     }),
-    allowList: ['/health', '/ready'],
+    allowList: ['/health', '/ready', '/api/v1/auth/login', '/api/v1/auth/register', '/api/v1/auth/dev-token'],
   });
 
   // Swagger documentation

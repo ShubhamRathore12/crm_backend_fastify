@@ -33,8 +33,10 @@ CREATE TABLE IF NOT EXISTS public.users (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   email           TEXT NOT NULL UNIQUE,
   name            TEXT NOT NULL DEFAULT '',
+  password_hash   TEXT,
   avatar_url      TEXT,
   role            TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'manager', 'user', 'viewer')),
+  team_id         UUID,
   status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'invited')),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()

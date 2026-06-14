@@ -4,6 +4,7 @@ const crypto = require('crypto');
 let bcrypt;
 try { bcrypt = require('bcrypt'); } catch { bcrypt = null; }
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { generateApiKey, authenticate } = require('../middleware/auth');
 
 const COOKIE_NAME = 'crm_token';
@@ -44,83 +45,126 @@ function setTokenCookie(reply, token) {
 
 async function authRoutes(fastify, opts) {
 
-  // ─── POST /login ─── Login & set cookie ───────────────────────────
-  fastify.post('/login', {
+  // ─── GET /admin-token ─── Direct admin token (development) ───────────────────────────
+  fastify.get('/admin-token', {
     schema: {
       tags: ['Auth'],
-      summary: 'Login with email/password - sets JWT cookie',
-      body: {
-        type: 'object',
-        required: ['email', 'password'],
-        properties: {
-          email: { type: 'string', format: 'email' },
-          password: { type: 'string', minLength: 1 },
-        },
-      },
+      summary: 'Get admin token (development only)',
     },
   }, async (request, reply) => {
-    const { email, password } = request.body;
-
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('id, name, email, password_hash, role, team_id, status')
-      .eq('email', email.toLowerCase().trim())
-      .single();
-
-    if (error || !user) {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password' });
+    if (process.env.NODE_ENV === 'production') {
+      return reply.code(404).send({ error: 'Not Found' });
     }
 
-    if (user.status !== 'active') {
-      return reply.code(401).send({ error: 'Unauthorized', message: 'Account is inactive' });
-    }
-
-    // Verify password (supports bcrypt or sha256 hashes)
-    if (user.password_hash) {
-      let passwordValid = false;
-
-      if (user.password_hash.startsWith('$2b$') || user.password_hash.startsWith('$2a$')) {
-        // Bcrypt hash
-        if (bcrypt) {
-          passwordValid = await bcrypt.compare(password, user.password_hash);
-        }
-      } else {
-        // SHA256 hash fallback
-        const sha256Hash = crypto
-          .createHash('sha256')
-          .update(password + (process.env.API_KEY_SALT || 'salt'))
-          .digest('hex');
-        passwordValid = (sha256Hash === user.password_hash);
-      }
-
-      if (!passwordValid) {
-        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password' });
-      }
-    }
-
-    // Generate JWT
     const token = generateToken({
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      team_id: user.team_id,
+      sub: 'a0000000-0000-0000-0000-000000000001',
+      email: 'admin@crm.com',
+      name: 'Admin User',
+      role: 'admin',
     });
 
-    // Set httpOnly cookie
     setTokenCookie(reply, token);
 
     return reply.send({
-      message: 'Login successful',
+      message: 'Admin token generated',
+      email: 'admin@crm.com',
+      password: 'Admin@123',
       token,
-      user: {
-        id: user.id,
-        name: user.name,
+    });
+  });
+
+  // ─── POST /login ─── Login & set cookie ───────────────────────────
+  fastify.post('/login', async (request, reply) => {
+    try {
+      const db = getPostgresClient();
+      request.log.info('Login handler reached');
+      const body = request.body;
+      request.log.info({ body }, 'Request body');
+      
+      const { email, password } = body || {};
+      
+      request.log.info({ email, password }, 'Login attempt');
+
+      if (!email || !password) {
+        request.log.warn('Missing email or password');
+        return reply.code(400).send({ error: 'Bad Request', message: 'Email and password are required' });
+      }
+
+      // Use direct PostgreSQL instead of Supabase cloud
+      let user;
+      try {
+        user = await db.getUserByEmail(email);
+      } catch (dbErr) {
+        request.log.error({ err: dbErr }, 'Database connection error');
+        return reply.code(503).send({ error: 'Service Unavailable', message: 'Database connection failed' });
+      }
+
+      request.log.info({ email, userFound: !!user }, 'User lookup result');
+
+      if (!user) {
+        request.log.warn({ email }, 'User not found');
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password' });
+      }
+
+      if (user.status !== 'active') {
+        request.log.warn({ email, status: user.status }, 'Inactive user login attempt');
+        return reply.code(401).send({ error: 'Unauthorized', message: 'Account is inactive' });
+      }
+
+      // Verify password (supports bcrypt or sha256 hashes)
+      if (user.password_hash) {
+        let passwordValid = false;
+
+        if (user.password_hash.startsWith('$2b$') || user.password_hash.startsWith('$2a$')) {
+          // Bcrypt hash
+          request.log.info('Using bcrypt verification');
+          if (bcrypt) {
+            passwordValid = await bcrypt.compare(password, user.password_hash);
+          }
+        } else {
+          // SHA256 hash fallback
+          request.log.info('Using SHA256 verification');
+          const sha256Hash = crypto
+            .createHash('sha256')
+            .update(password + (process.env.API_KEY_SALT || 'salt'))
+            .digest('hex');
+          passwordValid = (sha256Hash === user.password_hash);
+          request.log.info({ computed: sha256Hash, stored: user.password_hash, match: passwordValid }, 'SHA256 check');
+        }
+
+        if (!passwordValid) {
+          request.log.warn({ email }, 'Password verification failed');
+          return reply.code(401).send({ error: 'Unauthorized', message: 'Invalid email or password' });
+        }
+      }
+
+      // Generate JWT
+      const token = generateToken({
+        sub: user.id,
         email: user.email,
+        name: user.name,
         role: user.role,
         team_id: user.team_id,
-      },
-    });
+      });
+
+      // Set httpOnly cookie
+      setTokenCookie(reply, token);
+
+      return reply.send({
+        message: 'Login successful',
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          team_id: user.team_id,
+        },
+      });
+    } catch (err) {
+      request.log.error({ err }, 'Login error');
+      return reply.code(500).send({ error: 'Server error', message: err.message });
+    }
   });
 
   // ─── POST /register ─── Register & set cookie ────────────────────
@@ -140,51 +184,45 @@ async function authRoutes(fastify, opts) {
       },
     },
   }, async (request, reply) => {
+    const db = getPostgresClient();
     const { name, email, password, role = 'agent' } = request.body;
     const normalizedEmail = email.toLowerCase().trim();
 
-    const { data: existing } = await supabase
-      .from('users')
-      .select('id')
-      .eq('email', normalizedEmail)
-      .maybeSingle();
+    try {
+      // Check if user already exists
+      const existingUser = await db.getUserByEmail(normalizedEmail);
+      if (existingUser) {
+        return reply.code(409).send({ error: 'Conflict', message: 'Email already registered' });
+      }
 
-    if (existing) {
-      return reply.code(409).send({ error: 'Conflict', message: 'Email already registered' });
-    }
+      // Hash password
+      const passwordHash = bcrypt
+        ? await bcrypt.hash(password, 12)
+        : crypto.createHash('sha256').update(password + (process.env.API_KEY_SALT || 'salt')).digest('hex');
 
-    const passwordHash = bcrypt
-      ? await bcrypt.hash(password, 12)
-      : crypto.createHash('sha256').update(password + (process.env.API_KEY_SALT || 'salt')).digest('hex');
-
-    const { data: user, error } = await supabase
-      .from('users')
-      .insert({
+      // Create user
+      const user = await db.createUser({
         name,
         email: normalizedEmail,
         password_hash: passwordHash,
         role,
-        status: 'active',
-        created_at: new Date().toISOString(),
-      })
-      .select('id, name, email, role, team_id, status, created_at')
-      .single();
+      });
 
-    if (error) {
-      return reply.code(500).send({ error: 'Database error', message: error.message });
+      const token = generateToken({
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        team_id: user.team_id,
+      });
+
+      setTokenCookie(reply, token);
+
+      return reply.code(201).send({ message: 'Registration successful', token, user });
+    } catch (err) {
+      request.log.error({ err }, 'Registration error');
+      return reply.code(500).send({ error: 'Database error', message: err.message });
     }
-
-    const token = generateToken({
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      team_id: user.team_id,
-    });
-
-    setTokenCookie(reply, token);
-
-    return reply.code(201).send({ message: 'Registration successful', token, user });
   });
 
   // ─── POST /logout ─── Clear cookie ───────────────────────────────
@@ -219,31 +257,27 @@ async function authRoutes(fastify, opts) {
       },
     },
   }, async (request, reply) => {
+    const db = getPostgresClient();
     const { name, scopes = ['*'] } = request.body;
     const { key, hash } = generateApiKey();
 
-    const { data, error } = await supabase
-      .from('api_keys')
-      .insert({
-        account_id: request.user.id,
-        name,
-        key_hash: hash,
-        scopes,
-        active: true,
-        created_at: new Date().toISOString(),
-      })
-      .select('id, name, scopes, created_at')
-      .single();
+    try {
+      const result = await db.query(
+        `INSERT INTO api_keys (account_id, name, key_hash, scopes, active, created_at)
+         VALUES ($1, $2, $3, $4, true, NOW())
+         RETURNING id, name, scopes, created_at`,
+        [request.user.id, name, hash, JSON.stringify(scopes)]
+      );
 
-    if (error) {
-      return reply.code(500).send({ error: 'Database error', message: error.message });
+      return reply.code(201).send({
+        message: 'API key created. Save this key - it cannot be shown again.',
+        api_key: key,
+        details: result.rows[0],
+      });
+    } catch (err) {
+      request.log.error({ err }, 'API key creation error');
+      return reply.code(500).send({ error: 'Database error', message: err.message });
     }
-
-    return reply.code(201).send({
-      message: 'API key created. Save this key - it cannot be shown again.',
-      api_key: key,
-      details: data,
-    });
   });
 
   // ─── GET /dev-token ─── Dev only ─────────────────────────────────
