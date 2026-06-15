@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 async function interactionsRoutes(fastify, opts) {
@@ -89,23 +90,68 @@ async function interactionsRoutes(fastify, opts) {
     } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase.from('interactions')
-      .select('*, contacts(name, email)', { count: 'exact' })
-      .range(offset, offset + limit - 1)
-      .order(sort, { ascending: order === 'asc' });
+    try {
+      const db = getPostgresClient();
 
-    if (search) query = query.or(`subject.ilike.%${search}%`);
-    if (contact_id) query = query.eq('contact_id', contact_id);
-    if (channel) query = query.eq('channel', channel);
-    if (status) query = query.eq('status', status);
-    if (priority) query = query.eq('priority', priority);
-    if (assigned_to) query = query.eq('assigned_to', assigned_to);
-    if (created_after) query = query.gte('created_at', created_after);
-    if (created_before) query = query.lte('created_at', created_before);
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
 
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+      if (search) {
+        whereConditions.push(`subject ILIKE $${params.length + 1}`);
+        params.push(`%${search}%`);
+      }
+      if (contact_id) {
+        whereConditions.push(`contact_id = $${params.length + 1}`);
+        params.push(contact_id);
+      }
+      if (channel) {
+        whereConditions.push(`channel = $${params.length + 1}`);
+        params.push(channel);
+      }
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+      if (priority) {
+        whereConditions.push(`priority = $${params.length + 1}`);
+        params.push(priority);
+      }
+      if (assigned_to) {
+        whereConditions.push(`assigned_to = $${params.length + 1}`);
+        params.push(assigned_to);
+      }
+      if (created_after) {
+        whereConditions.push(`created_at >= $${params.length + 1}`);
+        params.push(created_after);
+      }
+      if (created_before) {
+        whereConditions.push(`created_at <= $${params.length + 1}`);
+        params.push(created_before);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM interactions${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering (with contact info via JOIN)
+      const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+      const sql = `SELECT i.*, c.name as contact_name, c.email as contact_email FROM interactions i LEFT JOIN contacts c ON i.contact_id = c.id${whereClause} ORDER BY i.${sort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit) }
+      });
+    } catch (error) {
+      console.error('[Interactions] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   // ─── GET /:id ────────────────────────────────────────────────────

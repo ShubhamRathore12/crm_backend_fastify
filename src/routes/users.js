@@ -5,6 +5,7 @@ let bcrypt;
 try { bcrypt = require('bcrypt'); } catch { bcrypt = null; }
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 const USER_SAFE_COLS = 'id, name, email, role, team_id, status, created_at';
@@ -111,17 +112,51 @@ async function usersRoutes(fastify, opts) {
     const { page = 1, limit = 50, role, status, team_id, search } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase.from('users').select(USER_SAFE_COLS, { count: 'exact' })
-      .range(offset, offset + limit - 1).order('created_at', { ascending: false });
+    try {
+      const db = getPostgresClient();
 
-    if (role) query = query.eq('role', role);
-    if (status) query = query.eq('status', status);
-    if (team_id) query = query.eq('team_id', team_id);
-    if (search) query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
 
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+      if (role) {
+        whereConditions.push(`role = $${params.length + 1}`);
+        params.push(role);
+      }
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+      if (team_id) {
+        whereConditions.push(`team_id = $${params.length + 1}`);
+        params.push(team_id);
+      }
+      if (search) {
+        whereConditions.push(`(name ILIKE $${params.length + 1} OR email ILIKE $${params.length + 1})`);
+        params.push(`%${search}%`, `%${search}%`);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM users${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const sql = `SELECT ${USER_SAFE_COLS} FROM users${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit) }
+      });
+    } catch (error) {
+      console.error('[Users] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/:id', {

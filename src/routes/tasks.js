@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 async function tasksRoutes(fastify, opts) {
@@ -173,18 +174,56 @@ async function tasksRoutes(fastify, opts) {
     const { page = 1, limit = 50, status, priority, assigned_to, entity_type, entity_id, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase.from('tasks').select('*', { count: 'exact' })
-      .range(offset, offset + limit - 1).order(sort, { ascending: order === 'asc' });
+    try {
+      const db = getPostgresClient();
 
-    if (status) query = query.eq('status', status);
-    if (priority) query = query.eq('priority', priority);
-    if (assigned_to) query = query.eq('assigned_to', assigned_to);
-    if (entity_type) query = query.eq('entity_type', entity_type);
-    if (entity_id) query = query.eq('entity_id', entity_id);
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
 
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+      if (priority) {
+        whereConditions.push(`priority = $${params.length + 1}`);
+        params.push(priority);
+      }
+      if (assigned_to) {
+        whereConditions.push(`assigned_to = $${params.length + 1}`);
+        params.push(assigned_to);
+      }
+      if (entity_type) {
+        whereConditions.push(`entity_type = $${params.length + 1}`);
+        params.push(entity_type);
+      }
+      if (entity_id) {
+        whereConditions.push(`entity_id = $${params.length + 1}`);
+        params.push(entity_id);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM tasks${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+      const sql = `SELECT * FROM tasks${whereClause} ORDER BY ${sort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit) }
+      });
+    } catch (error) {
+      console.error('[Tasks] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/:id', {

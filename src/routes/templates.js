@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 const { substituteVariables } = require('../services/emailService');
 
@@ -63,23 +64,40 @@ async function templatesRoutes(fastify, options) {
     const { page = 1, limit = 20, search, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
-      .from('templates')
-      .select('id, name, subject, variables, created_at, updated_at', { count: 'exact' })
-      .range(offset, offset + limit - 1)
-      .order(sort, { ascending: order === 'asc' });
+    try {
+      const db = getPostgresClient();
 
-    if (search) {
-      query = query.or(`name.ilike.%${search}%,subject.ilike.%${search}%`);
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
+
+      if (search) {
+        whereConditions.push(`(name ILIKE $${params.length + 1} OR subject ILIKE $${params.length + 1})`);
+        params.push(`%${search}%`, `%${search}%`);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM templates${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+      const sql = `SELECT id, name, subject, variables, created_at, updated_at FROM templates${whereClause} ORDER BY ${sort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit) },
+      });
+    } catch (error) {
+      console.error('[Templates] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
     }
-
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-
-    return reply.send({
-      data,
-      pagination: { total: count, page, limit, pages: Math.ceil(count / limit) },
-    });
   });
 
   /**

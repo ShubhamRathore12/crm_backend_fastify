@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 const { addCampaignJob, removeCampaignJobs, getJob, QUEUE_NAMES } = require('../services/queueService');
 
@@ -33,21 +34,40 @@ async function campaignsRoutes(fastify, options) {
     const { page = 1, limit = 20, status, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase
-      .from('campaigns')
-      .select('*, templates(name)', { count: 'exact' })
-      .range(offset, offset + limit - 1)
-      .order(sort, { ascending: order === 'asc' });
+    try {
+      const db = getPostgresClient();
 
-    if (status) query = query.eq('status', status);
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
 
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
 
-    return reply.send({
-      data,
-      pagination: { total: count, page, limit, pages: Math.ceil(count / limit) },
-    });
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM campaigns${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+      const sql = `SELECT c.*, t.name as template_name FROM campaigns c LEFT JOIN templates t ON c.template_id = t.id${whereClause} ORDER BY c.${sort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit) },
+      });
+    } catch (error) {
+      console.error('[Campaigns] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   /**

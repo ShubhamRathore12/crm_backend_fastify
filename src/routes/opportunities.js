@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 async function opportunitiesRoutes(fastify, opts) {
@@ -101,27 +102,84 @@ async function opportunitiesRoutes(fastify, opts) {
     } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase.from('opportunities')
-      .select('*, leads(contact_id, source, status)', { count: 'exact' })
-      .range(offset, offset + limit - 1)
-      .order(sort, { ascending: order === 'asc' });
+    try {
+      const db = getPostgresClient();
 
-    if (search) query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
-    if (stage) query = query.eq('stage', stage);
-    if (assigned_to) query = query.eq('assigned_to', assigned_to);
-    if (lead_id) query = query.eq('lead_id', lead_id);
-    if (min_value) query = query.gte('value', min_value);
-    if (max_value) query = query.lte('value', max_value);
-    if (min_probability) query = query.gte('probability', min_probability);
-    if (max_probability) query = query.lte('probability', max_probability);
-    if (created_after) query = query.gte('created_at', created_after);
-    if (created_before) query = query.lte('created_at', created_before);
-    if (expected_close_after) query = query.gte('expected_closed_at', expected_close_after);
-    if (expected_close_before) query = query.lte('expected_closed_at', expected_close_before);
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
 
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+      if (search) {
+        whereConditions.push(`(title ILIKE $${params.length + 1} OR description ILIKE $${params.length + 1})`);
+        params.push(`%${search}%`, `%${search}%`);
+      }
+      if (stage) {
+        whereConditions.push(`stage = $${params.length + 1}`);
+        params.push(stage);
+      }
+      if (assigned_to) {
+        whereConditions.push(`assigned_to = $${params.length + 1}`);
+        params.push(assigned_to);
+      }
+      if (lead_id) {
+        whereConditions.push(`lead_id = $${params.length + 1}`);
+        params.push(lead_id);
+      }
+      if (min_value) {
+        whereConditions.push(`value >= $${params.length + 1}`);
+        params.push(min_value);
+      }
+      if (max_value) {
+        whereConditions.push(`value <= $${params.length + 1}`);
+        params.push(max_value);
+      }
+      if (min_probability) {
+        whereConditions.push(`probability >= $${params.length + 1}`);
+        params.push(min_probability);
+      }
+      if (max_probability) {
+        whereConditions.push(`probability <= $${params.length + 1}`);
+        params.push(max_probability);
+      }
+      if (created_after) {
+        whereConditions.push(`created_at >= $${params.length + 1}`);
+        params.push(created_after);
+      }
+      if (created_before) {
+        whereConditions.push(`created_at <= $${params.length + 1}`);
+        params.push(created_before);
+      }
+      if (expected_close_after) {
+        whereConditions.push(`expected_closed_at >= $${params.length + 1}`);
+        params.push(expected_close_after);
+      }
+      if (expected_close_before) {
+        whereConditions.push(`expected_closed_at <= $${params.length + 1}`);
+        params.push(expected_close_before);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM opportunities${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+      const sql = `SELECT o.*, l.contact_id, l.source, l.status FROM opportunities o LEFT JOIN leads l ON o.lead_id = l.id${whereClause} ORDER BY o.${sort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit) }
+      });
+    } catch (error) {
+      console.error('[Opportunities] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   // ─── GET /:id ────────────────────────────────────────────────────

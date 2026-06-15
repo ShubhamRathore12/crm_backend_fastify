@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { getOptimizedSupabaseClient } = require('../config/database');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 const csvParser = require('../utils/csvParser');
 
@@ -66,38 +67,50 @@ async function contactsRoutes(fastify, options) {
     const { page = 1, limit = 50, search, ucc_code, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
-    const result = await supabase.query('contacts', 'select', {
-      query: search ? {
-        $or: [
-          { email: { $ilike: `%${search}%` } },
-          { name: { $ilike: `%${search}%` } },
-          { mobile: { $ilike: `%${search}%` } },
-          { ucc_code: { $ilike: `%${search}%` } },
-          { pan: { $ilike: `%${search}%` } }
-        ]
-      } : ucc_code ? { ucc_code: { $ilike: `%${ucc_code}%` } } : {},
-      select: '*',
-      order: { column: sort, ascending: order === 'asc' },
-      limit,
-      offset,
-      cache: true
-    });
+    try {
+      const db = getPostgresClient();
 
-    if (result.error) {
-      return reply.code(500).send({ error: 'Database error', message: result.error.message });
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
+
+      if (search) {
+        whereConditions.push(`(email ILIKE $${params.length + 1} OR name ILIKE $${params.length + 1} OR mobile ILIKE $${params.length + 1} OR ucc_code ILIKE $${params.length + 1} OR pan ILIKE $${params.length + 1})`);
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      } else if (ucc_code) {
+        whereConditions.push(`ucc_code ILIKE $${params.length + 1}`);
+        params.push(`%${ucc_code}%`);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM contacts${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+      const sql = `SELECT * FROM contacts${whereClause} ORDER BY ${sort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: {
+          total: count,
+          page,
+          limit,
+          pages: Math.ceil(count / limit),
+          hasNext: offset + limit < count,
+          hasPrev: page > 1,
+        },
+      });
+    } catch (error) {
+      console.error('[Contacts] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
     }
-
-    return reply.send({
-      data: result.data || [],
-      pagination: {
-        total: result.data ? result.data.length : 0,
-        page,
-        limit,
-        pages: Math.ceil((result.data ? result.data.length : 0) / limit),
-        hasNext: offset + limit < (result.data ? result.data.length : 0),
-        hasPrev: page > 1,
-      },
-    });
   });
 
   // ─── GET /stats ─── Contact statistics (MUST come before /:id) ────

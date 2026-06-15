@@ -2,6 +2,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 async function leadsRoutes(fastify, opts) {
@@ -33,22 +34,56 @@ async function leadsRoutes(fastify, opts) {
     const { page = 1, limit = 20, search, status, stage, source, assigned_to, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
-    let query = supabase.from('leads').select('id, name, email, phone, company, source, stage, status, lead_score, created_at, assigned_to, updated_at', { count: 'exact' });
+    try {
+      const db = getPostgresClient();
 
-    if (search) {
-      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%,company.ilike.%${search}%,phone.ilike.%${search}%`);
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
+
+      if (search) {
+        whereConditions.push(`(name ILIKE $${params.length + 1} OR email ILIKE $${params.length + 1} OR company ILIKE $${params.length + 1} OR phone ILIKE $${params.length + 1})`);
+        params.push(`%${search}%`);
+      }
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+      if (stage) {
+        whereConditions.push(`stage = $${params.length + 1}`);
+        params.push(stage);
+      }
+      if (source) {
+        whereConditions.push(`source = $${params.length + 1}`);
+        params.push(source);
+      }
+      if (assigned_to) {
+        whereConditions.push(`assigned_to = $${params.length + 1}`);
+        params.push(assigned_to);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM leads${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
+      const sql = `SELECT id, name, email, phone, company, source, stage, status, lead_score, created_at, assigned_to, updated_at FROM leads${whereClause} ORDER BY ${sort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil((count || 0) / limit) }
+      });
+    } catch (error) {
+      console.error('[Leads] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
     }
-    if (status) query = query.eq('status', status);
-    if (stage) query = query.eq('stage', stage);
-    if (source) query = query.eq('source', source);
-    if (assigned_to) query = query.eq('assigned_to', assigned_to);
-
-    const { data, error, count } = await query
-      .order(sort, { ascending: order === 'asc' })
-      .range(offset, offset + limit - 1);
-
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil((count || 0) / limit) } });
   });
 
   // ────────────────────────────────────────────────────────────────
