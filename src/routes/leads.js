@@ -36,43 +36,37 @@ async function leadsRoutes(fastify, opts) {
 
     try {
       const db = getPostgresClient();
-
-      // Build WHERE clause
       const params = [];
       let whereConditions = [];
 
-      if (search) {
-        whereConditions.push(`(c.first_name ILIKE $${params.length + 1} OR c.last_name ILIKE $${params.length + 1} OR c.email ILIKE $${params.length + 1} OR c.company ILIKE $${params.length + 1} OR c.phone ILIKE $${params.length + 1})`);
-        params.push(`%${search}%`);
-      }
       if (status) {
-        whereConditions.push(`l.status = $${params.length + 1}`);
+        whereConditions.push(`status = $${params.length + 1}`);
         params.push(status);
       }
       if (stage) {
-        whereConditions.push(`l.stage = $${params.length + 1}`);
+        whereConditions.push(`stage = $${params.length + 1}`);
         params.push(stage);
       }
       if (source) {
-        whereConditions.push(`l.source = $${params.length + 1}`);
+        whereConditions.push(`source = $${params.length + 1}`);
         params.push(source);
       }
       if (assigned_to) {
-        whereConditions.push(`l.assigned_to = $${params.length + 1}`);
+        whereConditions.push(`assigned_to = $${params.length + 1}`);
         params.push(assigned_to);
       }
 
       const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
 
       // Get total count
-      const countQuery = `SELECT COUNT(*) as count FROM leads l LEFT JOIN contacts c ON l.contact_id = c.id${whereClause}`;
+      const countQuery = `SELECT COUNT(*) as count FROM leads${whereClause}`;
       const countResult = await db.query(countQuery, params);
       const count = countResult.rows[0]?.count || 0;
 
       // Get paginated data with ordering
       const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
-      const sortField = sort === 'created_at' ? 'l.created_at' : sort === 'stage' ? 'l.stage' : sort === 'source' ? 'l.source' : 'l.created_at';
-      const sql = `SELECT l.id, l.contact_id, l.source, l.stage, l.status, l.assigned_to, l.created_at, l.updated_at, c.first_name, c.last_name, c.email, c.company, c.phone FROM leads l LEFT JOIN contacts c ON l.contact_id = c.id${whereClause} ORDER BY ${sortField} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      const validSort = ['created_at', 'stage', 'source', 'status'].includes(sort) ? sort : 'created_at';
+      const sql = `SELECT id, contact_id, source, stage, status, assigned_to, created_at, updated_at FROM leads${whereClause} ORDER BY ${validSort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
       params.push(limit, offset);
 
       const result = await db.query(sql, params);
