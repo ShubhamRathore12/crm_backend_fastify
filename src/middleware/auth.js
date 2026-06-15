@@ -15,7 +15,11 @@ const { supabase } = require('../config/supabase');
  * @returns {Object} decoded payload
  */
 function verifyCustomJWT(token) {
-  const parts = token.split('.');
+  if (!token || typeof token !== 'string' || token.trim() === '') {
+    throw new Error('invalid token format');
+  }
+
+  const parts = token.trim().split('.');
   if (parts.length !== 3) throw new Error('invalid token format');
 
   const [headerB64, payloadB64, signature] = parts;
@@ -120,33 +124,53 @@ async function authenticate(request, reply) {
 
     // 1. Try JWT from cookie
     if (cookieToken) {
-      const user = await verifySupabaseJWT(cookieToken);
-      request.user = {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role || 'user',
-        team_id: user.team_id,
-        scopes: ['*'],
-        authType: 'cookie',
-      };
-      return;
+      try {
+        const user = await verifySupabaseJWT(cookieToken);
+        request.user = {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role || 'user',
+          team_id: user.team_id,
+          scopes: ['*'],
+          authType: 'cookie',
+        };
+        return;
+      } catch (cookieErr) {
+        return reply.code(401).send({
+          error: 'Unauthorized',
+          message: 'Invalid session token: ' + cookieErr.message,
+        });
+      }
     }
 
     // 2. Try Bearer JWT from header
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.slice(7);
-      const user = await verifySupabaseJWT(token);
-      request.user = {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role || 'user',
-        team_id: user.team_id,
-        scopes: ['*'],
-        authType: 'jwt',
-      };
-      return;
+      if (!token || token.trim() === '') {
+        return reply.code(401).send({
+          error: 'Unauthorized',
+          message: 'Bearer token is empty',
+        });
+      }
+      try {
+        const user = await verifySupabaseJWT(token);
+        request.user = {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role || 'user',
+          team_id: user.team_id,
+          scopes: ['*'],
+          authType: 'jwt',
+        };
+        return;
+      } catch (tokenErr) {
+        return reply.code(401).send({
+          error: 'Unauthorized',
+          message: 'Invalid bearer token: ' + tokenErr.message,
+        });
+      }
     }
 
     // 3. Try API key
