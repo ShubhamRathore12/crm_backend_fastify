@@ -52,6 +52,39 @@ async function leadsRoutes(fastify, opts) {
   });
 
   // ────────────────────────────────────────────────────────────────
+  // GET /leads/stats/overview - Get lead statistics (MUST come before /:id)
+  // ────────────────────────────────────────────────────────────────
+  fastify.get('/stats/overview', {
+    schema: {
+      tags: ['Leads'],
+      summary: 'Get lead statistics overview',
+    },
+  }, async (request, reply) => {
+    const { data } = await supabase.from('leads').select('status, stage, source, lead_score');
+    const leads = data || [];
+
+    const byStatus = {}, byStage = {}, bySource = {};
+    let totalScore = 0;
+
+    leads.forEach(l => {
+      byStatus[l.status] = (byStatus[l.status] || 0) + 1;
+      byStage[l.stage] = (byStage[l.stage] || 0) + 1;
+      bySource[l.source] = (bySource[l.source] || 0) + 1;
+      totalScore += l.lead_score || 0;
+    });
+
+    const avgScore = leads.length > 0 ? (totalScore / leads.length).toFixed(2) : 0;
+
+    return reply.send({
+      total: leads.length,
+      by_status: byStatus,
+      by_stage: byStage,
+      by_source: bySource,
+      average_score: parseFloat(avgScore),
+    });
+  });
+
+  // ────────────────────────────────────────────────────────────────
   // GET /leads/:id - Get single lead with full details
   // ────────────────────────────────────────────────────────────────
   fastify.get('/:id', {
@@ -495,39 +528,6 @@ async function leadsRoutes(fastify, opts) {
 
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
     return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil((count || 0) / limit) } });
-  });
-
-  // ────────────────────────────────────────────────────────────────
-  // GET /leads/stats - Get lead statistics
-  // ────────────────────────────────────────────────────────────────
-  fastify.get('/stats/overview', {
-    schema: {
-      tags: ['Leads'],
-      summary: 'Get lead statistics overview',
-    },
-  }, async (request, reply) => {
-    const { data } = await supabase.from('leads').select('status, stage, source, lead_score');
-    const leads = data || [];
-
-    const byStatus = {}, byStage = {}, bySource = {};
-    let totalScore = 0;
-
-    leads.forEach(l => {
-      byStatus[l.status] = (byStatus[l.status] || 0) + 1;
-      byStage[l.stage] = (byStage[l.stage] || 0) + 1;
-      bySource[l.source] = (bySource[l.source] || 0) + 1;
-      totalScore += l.lead_score || 0;
-    });
-
-    const avgScore = leads.length > 0 ? (totalScore / leads.length).toFixed(2) : 0;
-
-    return reply.send({
-      total: leads.length,
-      by_status: byStatus,
-      by_stage: byStage,
-      by_source: bySource,
-      average_score: parseFloat(avgScore),
-    });
   });
 
   // ────────────────────────────────────────────────────────────────
