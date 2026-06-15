@@ -31,7 +31,7 @@ async function leadsRoutes(fastify, opts) {
       },
     },
   }, async (request, reply) => {
-    const { page = 1, limit = 20, search, status, stage, source, assigned_to, sort = 'created_at', order = 'desc' } = request.query;
+    const { page = 1, limit = 20, search, sort = 'created_at', order = 'desc' } = request.query;
     const offset = (page - 1) * limit;
 
     try {
@@ -39,34 +39,22 @@ async function leadsRoutes(fastify, opts) {
       const params = [];
       let whereConditions = [];
 
-      if (status) {
-        whereConditions.push(`status = $${params.length + 1}`);
-        params.push(status);
-      }
-      if (stage) {
-        whereConditions.push(`stage = $${params.length + 1}`);
-        params.push(stage);
-      }
-      if (source) {
-        whereConditions.push(`source = $${params.length + 1}`);
-        params.push(source);
-      }
-      if (assigned_to) {
-        whereConditions.push(`assigned_to = $${params.length + 1}`);
-        params.push(assigned_to);
+      if (search) {
+        whereConditions.push(`(first_name ILIKE $${params.length + 1} OR last_name ILIKE $${params.length + 1} OR email ILIKE $${params.length + 1} OR company ILIKE $${params.length + 1} OR phone ILIKE $${params.length + 1})`);
+        params.push(`%${search}%`);
       }
 
       const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
 
       // Get total count
-      const countQuery = `SELECT COUNT(*) as count FROM leads${whereClause}`;
+      const countQuery = `SELECT COUNT(*) as count FROM contacts${whereClause}`;
       const countResult = await db.query(countQuery, params);
       const count = countResult.rows[0]?.count || 0;
 
       // Get paginated data with ordering
       const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
-      const validSort = ['created_at', 'stage', 'source', 'status'].includes(sort) ? sort : 'created_at';
-      const sql = `SELECT id, contact_id, source, stage, status, assigned_to, created_at, updated_at FROM leads${whereClause} ORDER BY ${validSort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      const validSort = ['created_at', 'email', 'name', 'company'].includes(sort) ? sort : 'created_at';
+      const sql = `SELECT id, email, first_name, last_name, phone, company, status, created_at, updated_at FROM contacts${whereClause} ORDER BY ${validSort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
       params.push(limit, offset);
 
       const result = await db.query(sql, params);
