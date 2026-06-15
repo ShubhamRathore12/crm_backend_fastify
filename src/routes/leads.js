@@ -71,8 +71,7 @@ async function leadsRoutes(fastify, opts) {
 
       // Get paginated data with ordering
       const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
-      const validSortFields = { created_at: 'l.created_at', stage: 'l.stage', source: 'l.source', status: 'l.status' };
-      const sortField = validSortFields[sort] || 'l.created_at';
+      const sortField = sort === 'created_at' ? 'l.created_at' : sort === 'stage' ? 'l.stage' : sort === 'source' ? 'l.source' : 'l.created_at';
       const sql = `SELECT l.id, l.contact_id, l.source, l.stage, l.status, l.assigned_to, l.created_at, l.updated_at, c.first_name, c.last_name, c.email, c.company, c.phone FROM leads l LEFT JOIN contacts c ON l.contact_id = c.id${whereClause} ORDER BY ${sortField} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
       params.push(limit, offset);
 
