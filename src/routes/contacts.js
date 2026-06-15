@@ -100,6 +100,32 @@ async function contactsRoutes(fastify, options) {
     });
   });
 
+  // ─── GET /stats ─── Contact statistics (MUST come before /:id) ────
+  fastify.get('/stats', {
+    schema: {
+      tags: ['Contacts'],
+      summary: 'Get contact statistics',
+    },
+  }, async (request, reply) => {
+    const { data: totalCount } = await supabase.query('contacts', 'count', {
+      cache: true
+    });
+
+    const { data: recentContacts } = await supabase.query('contacts', 'select', {
+      select: 'id, name, email, created_at',
+      order: { column: 'created_at', ascending: false },
+      limit: 5,
+      cache: true
+    });
+
+    return reply.send({
+      data: {
+        total: totalCount?.count || 0,
+        recent: recentContacts?.data || [],
+      },
+    });
+  });
+
   // ─── GET /:id ─── Single contact ──────────────────────────────────
   fastify.get('/:id', {
     schema: {
@@ -665,32 +691,6 @@ async function contactsRoutes(fastify, options) {
     return reply.send({
       data: data?.data || [],
       pagination: { total: count || 0, page, limit, pages: Math.ceil((count || 0) / limit) },
-    });
-  });
-
-  // ─── GET /stats ─── Contact statistics ────────────────────────────
-  fastify.get('/stats', {
-    schema: {
-      tags: ['Contacts'],
-      summary: 'Get contact statistics',
-    },
-  }, async (request, reply) => {
-    const { data: totalCount } = await supabase.query('contacts', 'count', {
-      cache: true
-    });
-
-    const { data: recentContacts } = await supabase.query('contacts', 'select', {
-      select: 'id, name, email, created_at',
-      order: { column: 'created_at', ascending: false },
-      limit: 5,
-      cache: true
-    });
-
-    return reply.send({
-      data: {
-        total: totalCount?.count || 0,
-        recent: recentContacts?.data || [],
-      },
     });
   });
 }
