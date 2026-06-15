@@ -52,9 +52,9 @@ async function leadsRoutes(fastify, opts) {
   });
 
   // ────────────────────────────────────────────────────────────────
-  // GET /leads/stats/overview - Get lead statistics (MUST come before /:id)
+  // GET /leads/stats - Get lead statistics (MUST come before /:id)
   // ────────────────────────────────────────────────────────────────
-  fastify.get('/stats/overview', {
+  fastify.get('/stats', {
     schema: {
       tags: ['Leads'],
       summary: 'Get lead statistics overview',
