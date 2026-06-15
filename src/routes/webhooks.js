@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { processBounce, processUnsubscribe, processComplaint, updateEmailLog } = require('../services/emailService');
 const { addBounceJob } = require('../services/queueService');
 
@@ -105,10 +105,11 @@ async function webhooksRoutes(fastify, options) {
 
           // Update email log if we can find it
           if (notification.mail?.messageId) {
-            await supabase
-              .from('email_logs')
-              .update({ status: 'bounced', updated_at: new Date().toISOString() })
-              .eq('message_id', notification.mail.messageId);
+            const db = getPostgresClient();
+            await db.query(
+              'UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3',
+              ['bounced', new Date().toISOString(), notification.mail.messageId]
+            );
           }
         }
       } else if (notificationType === 'Complaint') {
@@ -116,18 +117,20 @@ async function webhooksRoutes(fastify, options) {
         for (const recipient of complaint.complainedRecipients) {
           await processComplaint(recipient.emailAddress, 'ses', { complaint, notification });
           if (notification.mail?.messageId) {
-            await supabase
-              .from('email_logs')
-              .update({ status: 'complained', updated_at: new Date().toISOString() })
-              .eq('message_id', notification.mail.messageId);
+            const db = getPostgresClient();
+            await db.query(
+              'UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3',
+              ['complained', new Date().toISOString(), notification.mail.messageId]
+            );
           }
         }
       } else if (notificationType === 'Delivery') {
         if (notification.mail?.messageId) {
-          await supabase
-            .from('email_logs')
-            .update({ status: 'delivered', updated_at: new Date().toISOString() })
-            .eq('message_id', notification.mail.messageId);
+          const db = getPostgresClient();
+          await db.query(
+            'UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3',
+            ['delivered', new Date().toISOString(), notification.mail.messageId]
+          );
         }
       }
     } catch (err) {
@@ -176,67 +179,69 @@ async function webhooksRoutes(fastify, options) {
         const timestamp_s = event.timestamp ? new Date(event.timestamp * 1000).toISOString() : new Date().toISOString();
 
         switch (event.event) {
-          case 'delivered':
+          case 'delivered': {
             if (emailLogId || messageId) {
-              const query = supabase.from('email_logs').update({
-                status: 'delivered',
-                updated_at: timestamp_s,
-              });
-              if (emailLogId) await query.eq('id', emailLogId);
-              else if (messageId) await query.eq('message_id', messageId);
+              const db = getPostgresClient();
+              if (emailLogId) {
+                await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE id = $3', ['delivered', timestamp_s, emailLogId]);
+              } else if (messageId) {
+                await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3', ['delivered', timestamp_s, messageId]);
+              }
             }
             break;
+          }
 
-          case 'open':
+          case 'open': {
             if (emailLogId || messageId) {
-              const query = supabase.from('email_logs').update({
-                status: 'opened',
-                opened_at: timestamp_s,
-                updated_at: timestamp_s,
-              });
-              if (emailLogId) await query.eq('id', emailLogId);
-              else if (messageId) await query.eq('message_id', messageId);
+              const db = getPostgresClient();
+              if (emailLogId) {
+                await db.query('UPDATE email_logs SET status = $1, opened_at = $2, updated_at = $3 WHERE id = $4', ['opened', timestamp_s, timestamp_s, emailLogId]);
+              } else if (messageId) {
+                await db.query('UPDATE email_logs SET status = $1, opened_at = $2, updated_at = $3 WHERE message_id = $4', ['opened', timestamp_s, timestamp_s, messageId]);
+              }
             }
             break;
+          }
 
-          case 'click':
+          case 'click': {
             if (emailLogId || messageId) {
-              const query = supabase.from('email_logs').update({
-                status: 'clicked',
-                clicked_at: timestamp_s,
-                updated_at: timestamp_s,
-              });
-              if (emailLogId) await query.eq('id', emailLogId);
-              else if (messageId) await query.eq('message_id', messageId);
+              const db = getPostgresClient();
+              if (emailLogId) {
+                await db.query('UPDATE email_logs SET status = $1, clicked_at = $2, updated_at = $3 WHERE id = $4', ['clicked', timestamp_s, timestamp_s, emailLogId]);
+              } else if (messageId) {
+                await db.query('UPDATE email_logs SET status = $1, clicked_at = $2, updated_at = $3 WHERE message_id = $4', ['clicked', timestamp_s, timestamp_s, messageId]);
+              }
             }
             break;
+          }
 
           case 'bounce':
           case 'blocked': {
             const bounceType = event.type === 'bounce' ? 'hard' : 'soft';
             await addBounceJob({ email, bounceType, provider: 'sendgrid', rawData: event });
             if (emailLogId || messageId) {
-              const query = supabase.from('email_logs').update({
-                status: 'bounced',
-                updated_at: timestamp_s,
-              });
-              if (emailLogId) await query.eq('id', emailLogId);
-              else if (messageId) await query.eq('message_id', messageId);
+              const db = getPostgresClient();
+              if (emailLogId) {
+                await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE id = $3', ['bounced', timestamp_s, emailLogId]);
+              } else if (messageId) {
+                await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3', ['bounced', timestamp_s, messageId]);
+              }
             }
             break;
           }
 
-          case 'spamreport':
+          case 'spamreport': {
             await processComplaint(email, 'sendgrid', event);
             if (emailLogId || messageId) {
-              const query = supabase.from('email_logs').update({
-                status: 'complained',
-                updated_at: timestamp_s,
-              });
-              if (emailLogId) await query.eq('id', emailLogId);
-              else if (messageId) await query.eq('message_id', messageId);
+              const db = getPostgresClient();
+              if (emailLogId) {
+                await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE id = $3', ['complained', timestamp_s, emailLogId]);
+              } else if (messageId) {
+                await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3', ['complained', timestamp_s, messageId]);
+              }
             }
             break;
+          }
 
           case 'unsubscribe':
           case 'group_unsubscribe':
@@ -309,49 +314,69 @@ async function webhooksRoutes(fastify, options) {
 
     try {
       switch (event) {
-        case 'delivered':
+        case 'delivered': {
           if (emailLogId || messageId) {
-            const q = supabase.from('email_logs').update({ status: 'delivered', updated_at: eventTime });
-            if (emailLogId) await q.eq('id', emailLogId);
-            else await q.eq('message_id', messageId);
+            const db = getPostgresClient();
+            if (emailLogId) {
+              await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE id = $3', ['delivered', eventTime, emailLogId]);
+            } else {
+              await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3', ['delivered', eventTime, messageId]);
+            }
           }
           break;
+        }
 
-        case 'opened':
+        case 'opened': {
           if (emailLogId || messageId) {
-            const q = supabase.from('email_logs').update({ status: 'opened', opened_at: eventTime, updated_at: eventTime });
-            if (emailLogId) await q.eq('id', emailLogId);
-            else await q.eq('message_id', messageId);
+            const db = getPostgresClient();
+            if (emailLogId) {
+              await db.query('UPDATE email_logs SET status = $1, opened_at = $2, updated_at = $3 WHERE id = $4', ['opened', eventTime, eventTime, emailLogId]);
+            } else {
+              await db.query('UPDATE email_logs SET status = $1, opened_at = $2, updated_at = $3 WHERE message_id = $4', ['opened', eventTime, eventTime, messageId]);
+            }
           }
           break;
+        }
 
-        case 'clicked':
+        case 'clicked': {
           if (emailLogId || messageId) {
-            const q = supabase.from('email_logs').update({ status: 'clicked', clicked_at: eventTime, updated_at: eventTime });
-            if (emailLogId) await q.eq('id', emailLogId);
-            else await q.eq('message_id', messageId);
+            const db = getPostgresClient();
+            if (emailLogId) {
+              await db.query('UPDATE email_logs SET status = $1, clicked_at = $2, updated_at = $3 WHERE id = $4', ['clicked', eventTime, eventTime, emailLogId]);
+            } else {
+              await db.query('UPDATE email_logs SET status = $1, clicked_at = $2, updated_at = $3 WHERE message_id = $4', ['clicked', eventTime, eventTime, messageId]);
+            }
           }
           break;
+        }
 
         case 'failed':
-        case 'permanent_fail':
+        case 'permanent_fail': {
           if (email) {
             await addBounceJob({ email, bounceType: 'hard', provider: 'mailgun', rawData: eventData });
           }
           if (emailLogId || messageId) {
-            const q = supabase.from('email_logs').update({ status: 'bounced', updated_at: eventTime });
-            if (emailLogId) await q.eq('id', emailLogId);
-            else await q.eq('message_id', messageId);
+            const db = getPostgresClient();
+            if (emailLogId) {
+              await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE id = $3', ['bounced', eventTime, emailLogId]);
+            } else {
+              await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3', ['bounced', eventTime, messageId]);
+            }
           }
           break;
+        }
 
-        case 'temporary_fail':
+        case 'temporary_fail': {
           if (emailLogId || messageId) {
-            const q = supabase.from('email_logs').update({ status: 'failed', updated_at: eventTime });
-            if (emailLogId) await q.eq('id', emailLogId);
-            else await q.eq('message_id', messageId);
+            const db = getPostgresClient();
+            if (emailLogId) {
+              await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE id = $3', ['failed', eventTime, emailLogId]);
+            } else {
+              await db.query('UPDATE email_logs SET status = $1, updated_at = $2 WHERE message_id = $3', ['failed', eventTime, messageId]);
+            }
           }
           break;
+        }
 
         case 'complained':
           if (email) await processComplaint(email, 'mailgun', eventData);
@@ -380,12 +405,11 @@ async function webhooksRoutes(fastify, options) {
     const { emailLogId } = request.params;
 
     // Fire and forget the update
-    supabase.from('email_logs')
-      .update({ status: 'opened', opened_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', emailLogId)
-      .neq('status', 'clicked') // don't downgrade from clicked
-      .then(() => {})
-      .catch(() => {});
+    const db = getPostgresClient();
+    db.query(
+      'UPDATE email_logs SET status = $1, opened_at = $2, updated_at = $3 WHERE id = $4 AND status != $5',
+      ['opened', new Date().toISOString(), new Date().toISOString(), emailLogId, 'clicked']
+    ).then(() => {}).catch(() => {});
 
     // Return a 1x1 transparent GIF
     const gif = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
@@ -414,11 +438,11 @@ async function webhooksRoutes(fastify, options) {
       emailLogId = decoded.id;
 
       if (emailLogId) {
-        supabase.from('email_logs')
-          .update({ status: 'clicked', clicked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-          .eq('id', emailLogId)
-          .then(() => {})
-          .catch(() => {});
+        const db = getPostgresClient();
+        db.query(
+          'UPDATE email_logs SET status = $1, clicked_at = $2, updated_at = $3 WHERE id = $4',
+          ['clicked', new Date().toISOString(), new Date().toISOString(), emailLogId]
+        ).then(() => {}).catch(() => {});
       }
     } catch (err) {
       request.log.warn({ token }, 'Invalid click tracking token');

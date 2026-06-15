@@ -1,6 +1,7 @@
 'use strict';
 
 const { getOptimizedSupabaseClient } = require('../config/database');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 const { getProviderHealth } = require('../services/providerService');
 const { getQueueStats } = require('../services/queueService');

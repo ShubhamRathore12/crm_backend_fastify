@@ -1,6 +1,7 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
+const { getPostgresClient } = require('../config/postgres');
 const { supabase } = require('../config/supabase');
 const { authenticate } = require('../middleware/auth');
 
@@ -11,9 +12,15 @@ async function aiRoutes(fastify, opts) {
   fastify.get('/config', {
     schema: { tags: ['AI'], summary: 'List AI configurations' },
   }, async (request, reply) => {
-    const { data, error } = await supabase.from('ai_configuration').select('*').order('feature_name');
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [] });
+    try {
+      const db = getPostgresClient();
+      const sql = 'SELECT * FROM ai_configuration ORDER BY feature_name ASC';
+      const result = await db.query(sql);
+      return reply.send({ data: result.rows || [] });
+    } catch (error) {
+      console.error('[AI] GET /config error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/config/:id', {
@@ -70,10 +77,32 @@ async function aiRoutes(fastify, opts) {
   }, async (request, reply) => {
     const { page = 1, limit = 20 } = request.query;
     const offset = (page - 1) * limit;
-    const { data, error, count } = await supabase.from('sales_predictions')
-      .select('*', { count: 'exact' }).range(offset, offset + limit - 1).order('created_at', { ascending: false });
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+    try {
+      const db = getPostgresClient();
+
+      // Get total count
+      const countResult = await db.query('SELECT COUNT(*) as count FROM sales_predictions');
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const sql = 'SELECT * FROM sales_predictions ORDER BY created_at DESC LIMIT $1 OFFSET $2';
+      const result = await db.query(sql, [limit, offset]);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: {
+          total: count,
+          page,
+          limit,
+          pages: Math.ceil(count / limit),
+          hasNext: offset + limit < count,
+          hasPrev: page > 1,
+        },
+      });
+    } catch (error) {
+      console.error('[AI] GET /predictions error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/predictions/latest', {
@@ -115,13 +144,50 @@ async function aiRoutes(fastify, opts) {
   }, async (request, reply) => {
     const { page = 1, limit = 20, model_type, status } = request.query;
     const offset = (page - 1) * limit;
-    let query = supabase.from('model_retraining_logs').select('*', { count: 'exact' })
-      .range(offset, offset + limit - 1).order('started_at', { ascending: false });
-    if (model_type) query = query.eq('model_type', model_type);
-    if (status) query = query.eq('status', status);
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+    try {
+      const db = getPostgresClient();
+
+      // Build WHERE clause
+      const params = [];
+      let whereConditions = [];
+
+      if (model_type) {
+        whereConditions.push(`model_type = $${params.length + 1}`);
+        params.push(model_type);
+      }
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM model_retraining_logs${whereClause}`;
+      const countResult = await db.query(countQuery, params);
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data with ordering
+      const sql = `SELECT * FROM model_retraining_logs${whereClause} ORDER BY started_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: {
+          total: count,
+          page,
+          limit,
+          pages: Math.ceil(count / limit),
+          hasNext: offset + limit < count,
+          hasPrev: page > 1,
+        },
+      });
+    } catch (error) {
+      console.error('[AI] GET /models/logs error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/models/logs/:id', {
@@ -171,9 +237,15 @@ async function aiRoutes(fastify, opts) {
   fastify.get('/performance', {
     schema: { tags: ['AI'], summary: 'Get AI performance metrics (view)' },
   }, async (request, reply) => {
-    const { data, error } = await supabase.from('ai_performance_metrics').select('*');
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [] });
+    try {
+      const db = getPostgresClient();
+      const sql = 'SELECT * FROM ai_performance_metrics';
+      const result = await db.query(sql);
+      return reply.send({ data: result.rows || [] });
+    } catch (error) {
+      console.error('[AI] GET /performance error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 }
 

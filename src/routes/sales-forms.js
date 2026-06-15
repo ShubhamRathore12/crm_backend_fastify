@@ -1,7 +1,7 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
-const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 async function salesFormsRoutes(fastify, opts) {
@@ -37,12 +37,38 @@ async function salesFormsRoutes(fastify, opts) {
   }, async (request, reply) => {
     const { page = 1, limit = 20, is_active } = request.query;
     const offset = (page - 1) * limit;
-    let query = supabase.from('sales_forms').select('*', { count: 'exact' })
-      .range(offset, offset + limit - 1).order('created_at', { ascending: false });
-    if (is_active !== undefined) query = query.eq('is_active', is_active);
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+
+    try {
+      const db = getPostgresClient();
+      const params = [];
+      const whereConditions = [];
+
+      if (is_active !== undefined) {
+        whereConditions.push(`is_active = $${params.length + 1}`);
+        params.push(is_active);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM sales_forms${whereClause}`;
+      const countResult = await db.query(countQuery, params.slice(0, whereConditions.length));
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data
+      const sql = `SELECT * FROM sales_forms${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit), hasNext: offset + limit < count, hasPrev: page > 1 }
+      });
+    } catch (error) {
+      console.error('[Sales Forms] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/:id', {
@@ -117,12 +143,38 @@ async function salesFormsRoutes(fastify, opts) {
   }, async (request, reply) => {
     const { page = 1, limit = 20, status } = request.query;
     const offset = (page - 1) * limit;
-    let query = supabase.from('sales_form_submissions').select('*', { count: 'exact' })
-      .eq('form_id', request.params.id).range(offset, offset + limit - 1).order('submitted_at', { ascending: false });
-    if (status) query = query.eq('status', status);
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+
+    try {
+      const db = getPostgresClient();
+      const params = [request.params.id];
+      const whereConditions = ['form_id = $1'];
+
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+
+      const whereClause = whereConditions.join(' AND ');
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM sales_form_submissions WHERE ${whereClause}`;
+      const countResult = await db.query(countQuery, params.slice(0, whereConditions.length));
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data
+      const sql = `SELECT * FROM sales_form_submissions WHERE ${whereClause} ORDER BY submitted_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit), hasNext: offset + limit < count, hasPrev: page > 1 }
+      });
+    } catch (error) {
+      console.error('[Sales Forms] GET /:id/submissions error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/:id/submissions/:submissionId', {

@@ -1,7 +1,7 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
-const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 async function callsRoutes(fastify, opts) {
@@ -56,18 +56,62 @@ async function callsRoutes(fastify, opts) {
   }, async (request, reply) => {
     const { page = 1, limit = 50, direction, status, agent_id, contact_id, lead_id, from_date, to_date } = request.query;
     const offset = (page - 1) * limit;
-    let query = supabase.from('call_logs').select('*', { count: 'exact' })
-      .range(offset, offset + limit - 1).order('created_at', { ascending: false });
-    if (direction) query = query.eq('direction', direction);
-    if (status) query = query.eq('status', status);
-    if (agent_id) query = query.eq('agent_id', agent_id);
-    if (contact_id) query = query.eq('contact_id', contact_id);
-    if (lead_id) query = query.eq('lead_id', lead_id);
-    if (from_date) query = query.gte('created_at', from_date);
-    if (to_date) query = query.lte('created_at', to_date);
-    const { data, error, count } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [], pagination: { total: count, page, limit, pages: Math.ceil(count / limit) } });
+
+    try {
+      const db = getPostgresClient();
+      const params = [];
+      const whereConditions = [];
+
+      if (direction) {
+        whereConditions.push(`direction = $${params.length + 1}`);
+        params.push(direction);
+      }
+      if (status) {
+        whereConditions.push(`status = $${params.length + 1}`);
+        params.push(status);
+      }
+      if (agent_id) {
+        whereConditions.push(`agent_id = $${params.length + 1}`);
+        params.push(agent_id);
+      }
+      if (contact_id) {
+        whereConditions.push(`contact_id = $${params.length + 1}`);
+        params.push(contact_id);
+      }
+      if (lead_id) {
+        whereConditions.push(`lead_id = $${params.length + 1}`);
+        params.push(lead_id);
+      }
+      if (from_date) {
+        whereConditions.push(`created_at >= $${params.length + 1}`);
+        params.push(from_date);
+      }
+      if (to_date) {
+        whereConditions.push(`created_at <= $${params.length + 1}`);
+        params.push(to_date);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+
+      // Get total count
+      const countQuery = `SELECT COUNT(*) as count FROM call_logs${whereClause}`;
+      const countResult = await db.query(countQuery, params.slice(0, whereConditions.length));
+      const count = countResult.rows[0]?.count || 0;
+
+      // Get paginated data
+      const sql = `SELECT * FROM call_logs${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(limit, offset);
+
+      const result = await db.query(sql, params);
+
+      return reply.send({
+        data: result.rows || [],
+        pagination: { total: count, page, limit, pages: Math.ceil(count / limit), hasNext: offset + limit < count, hasPrev: page > 1 }
+      });
+    } catch (error) {
+      console.error('[Calls] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/:id', {

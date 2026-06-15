@@ -1,7 +1,7 @@
 'use strict';
 
 const { v4: uuidv4 } = require('uuid');
-const { supabase } = require('../config/supabase');
+const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
 async function integrationsRoutes(fastify, opts) {
@@ -11,9 +11,15 @@ async function integrationsRoutes(fastify, opts) {
   fastify.get('/', {
     schema: { tags: ['Integrations'], summary: 'List integration connections' },
   }, async (request, reply) => {
-    const { data, error } = await supabase.from('integration_connections').select('*').order('created_at', { ascending: false });
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [] });
+    try {
+      const db = getPostgresClient();
+      const sql = 'SELECT * FROM integration_connections ORDER BY created_at DESC';
+      const result = await db.query(sql);
+      return reply.send({ data: result.rows || [] });
+    } catch (error) {
+      console.error('[Integrations] GET / error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/:id', {
@@ -95,11 +101,25 @@ async function integrationsRoutes(fastify, opts) {
       querystring: { type: 'object', properties: { entity_type: { type: 'string' } } },
     },
   }, async (request, reply) => {
-    let query = supabase.from('field_definitions').select('*').order('display_order');
-    if (request.query.entity_type) query = query.eq('entity_type', request.query.entity_type);
-    const { data, error } = await query;
-    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
-    return reply.send({ data: data || [] });
+    try {
+      const db = getPostgresClient();
+      const params = [];
+      const whereConditions = [];
+
+      if (request.query.entity_type) {
+        whereConditions.push(`entity_type = $${params.length + 1}`);
+        params.push(request.query.entity_type);
+      }
+
+      const whereClause = whereConditions.length > 0 ? ' WHERE ' + whereConditions.join(' AND ') : '';
+      const sql = `SELECT * FROM field_definitions${whereClause} ORDER BY display_order`;
+
+      const result = await db.query(sql, params);
+      return reply.send({ data: result.rows || [] });
+    } catch (error) {
+      console.error('[Integrations] GET /fields error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
   });
 
   fastify.get('/fields/entity/:entityType', {
