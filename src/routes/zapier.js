@@ -2,28 +2,37 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
+const { authenticate } = require('../middleware/auth');
 
 /**
  * Zapier integration routes.
- * Handles incoming webhooks from Zapier for meetings and emails.
+ *
+ * Mounted under the `/api/v1/zapier` prefix, so all paths here are RELATIVE.
+ *   POST /webhook      (public)  incoming events from Zapier
+ *   GET  /status       (auth)    connection status
+ *   POST /connect      (auth)    save api key + sync config
+ *   POST /disconnect   (auth)    remove connection
+ *
+ * Connections are stored in the shared `integration_connections` table
+ * (provider = 'zapier') so they also appear under Settings > Integrations.
  */
-module.exports = function(app) {
-  // Catch-all Zapier webhook — logs any event
-  app.post('/api/v1/zapier/webhook', async (request, reply) => {
-    const { event_type, data, contact_id, user_id } = request.body;
+module.exports = function zapierRoutes(app, opts, done) {
+  // ─── Incoming webhook (no auth — Zapier posts here) ─────────
+  app.post('/webhook', async (request, reply) => {
+    const { event_type, data, contact_id, user_id } = request.body || {};
 
     if (!event_type || !data) {
       return reply.code(400).send({ error: 'event_type and data required' });
     }
 
     try {
-      // Route by event type
       if (event_type === 'meeting_scheduled') {
-        await logMeeting(data, contact_id, user_id);
-      } else if (event_type === 'email_received' || event_type === 'email_sent') {
-        await logEmail(data, contact_id, user_id, event_type);
+        await logEvent('meeting', data, contact_id, user_id, 'received');
+      } else if (event_type === 'email_received') {
+        await logEvent('email', data, contact_id, user_id, 'received');
+      } else if (event_type === 'email_sent') {
+        await logEvent('email', data, contact_id, user_id, 'completed');
       }
-
       reply.code(200).send({ ok: true, event_type });
     } catch (err) {
       app.log.error(err);
@@ -31,39 +40,37 @@ module.exports = function(app) {
     }
   });
 
-  // Get Zapier integration status
-  app.get('/api/v1/zapier/status', { onRequest: [require('../middleware/auth')] }, async (request, reply) => {
+  // ─── Status ─────────────────────────────────────────────────
+  app.get('/status', { onRequest: [authenticate] }, async (request, reply) => {
     try {
-      const user_id = request.user?.id;
-      if (!user_id) return reply.code(401).send({ error: 'Unauthorized' });
-
-      // Check if user has Zapier config
       const { data, error } = await supabase
-        .from('integrations')
+        .from('integration_connections')
         .select('*')
-        .eq('user_id', user_id)
         .eq('provider', 'zapier')
-        .single();
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      if (error && error.code !== 'PGRST116') throw error;
+      if (error) throw error;
+      const conn = (data || [])[0];
 
-      if (!data) {
+      if (!conn) {
         return reply.send({
           connected: false,
           provider: 'zapier',
-          message: 'Not connected. Install Zapier app to enable.'
+          message: 'Not connected. Add your Zapier API key to enable syncing.',
         });
       }
 
       reply.send({
         connected: true,
         provider: 'zapier',
-        name: data.name,
-        created_at: data.created_at,
+        name: conn.name || 'Zapier',
+        created_at: conn.created_at,
         config: {
-          email_sync: data.config?.email_sync || false,
-          meeting_sync: data.config?.meeting_sync || false,
-        }
+          email_sync: conn.config?.email_sync !== false,
+          meeting_sync: conn.config?.meeting_sync !== false,
+        },
       });
     } catch (err) {
       app.log.error(err);
@@ -71,128 +78,75 @@ module.exports = function(app) {
     }
   });
 
-  // Set Zapier integration config
-  app.post('/api/v1/zapier/connect', { onRequest: [require('../middleware/auth')] }, async (request, reply) => {
-    const { api_key, webhook_url } = request.body;
-    const user_id = request.user?.id;
-
-    if (!user_id || !api_key) {
-      return reply.code(400).send({ error: 'user_id and api_key required' });
-    }
+  // ─── Connect ────────────────────────────────────────────────
+  app.post('/connect', { onRequest: [authenticate] }, async (request, reply) => {
+    const { api_key, webhook_url, email_sync, meeting_sync } = request.body || {};
+    if (!api_key) return reply.code(400).send({ error: 'api_key required' });
 
     try {
-      const { data, error } = await supabase
-        .from('integrations')
-        .upsert({
-          id: uuidv4(),
-          user_id,
-          provider: 'zapier',
-          name: 'Zapier',
-          config: {
-            api_key,
-            webhook_url: webhook_url || `${process.env.API_BASE || 'http://localhost:8080'}/api/v1/zapier/webhook`,
-            email_sync: true,
-            meeting_sync: true,
-            created_at: new Date().toISOString()
-          }
-        }, { onConflict: 'user_id,provider' });
+      const now = new Date().toISOString();
+      // Deactivate any prior zapier connections, then insert a fresh one.
+      await supabase.from('integration_connections')
+        .update({ is_active: false, updated_at: now }).eq('provider', 'zapier');
+
+      const { data, error } = await supabase.from('integration_connections').insert({
+        id: uuidv4(),
+        provider: 'zapier',
+        name: 'Zapier',
+        is_active: true,
+        config: {
+          api_key,
+          webhook_url: webhook_url ||
+            `${process.env.API_BASE_URL || 'http://localhost:8080'}/api/v1/zapier/webhook`,
+          email_sync: email_sync !== false,
+          meeting_sync: meeting_sync !== false,
+        },
+        created_at: now,
+        updated_at: now,
+      }).select().single();
 
       if (error) throw error;
-
-      reply.send({ ok: true, message: 'Zapier connected' });
+      reply.send({ ok: true, message: 'Zapier connected', id: data.id });
     } catch (err) {
       app.log.error(err);
       reply.code(500).send({ error: err.message });
     }
   });
 
-  // Disconnect Zapier
-  app.post('/api/v1/zapier/disconnect', { onRequest: [require('../middleware/auth')] }, async (request, reply) => {
-    const user_id = request.user?.id;
-
-    if (!user_id) return reply.code(401).send({ error: 'Unauthorized' });
-
+  // ─── Disconnect ─────────────────────────────────────────────
+  app.post('/disconnect', { onRequest: [authenticate] }, async (request, reply) => {
     try {
-      const { error } = await supabase
-        .from('integrations')
-        .delete()
-        .eq('user_id', user_id)
+      const { error } = await supabase.from('integration_connections')
+        .update({ is_active: false, updated_at: new Date().toISOString() })
         .eq('provider', 'zapier');
-
       if (error) throw error;
-
       reply.send({ ok: true, message: 'Zapier disconnected' });
     } catch (err) {
       app.log.error(err);
       reply.code(500).send({ error: err.message });
     }
   });
+
+  done();
 };
 
 /**
- * Log meeting from Zapier.
+ * Persist a Zapier-sourced event as an interaction (best-effort).
  */
-async function logMeeting(data, contact_id, user_id) {
-  const { supabase } = require('../config/supabase');
+async function logEvent(channel, data, contact_id, user_id, status) {
+  const subject = data.title || data.subject || (channel === 'meeting' ? 'Meeting scheduled' : 'Email');
+  const description = channel === 'meeting'
+    ? `Meeting: ${data.title || 'Untitled'}\nTime: ${data.start_time || 'TBD'}\nAttendees: ${(data.attendees || []).join(', ') || 'TBD'}`
+    : (data.body || data.message || '');
 
-  const meeting = {
-    id: data.id || `zapier_meeting_${Date.now()}`,
-    contact_id: contact_id || data.contact_id,
-    title: data.title || 'Meeting scheduled',
-    description: `Meeting scheduled: ${data.title || 'Untitled'}
-Time: ${data.start_time || 'TBD'}
-Attendees: ${data.attendees?.join(', ') || 'TBD'}`,
-    scheduled_for: data.start_time,
-    source: 'zapier',
-    status: 'scheduled',
+  await supabase.from('interactions').insert([{
+    id: uuidv4(),
+    contact_id: contact_id || data.contact_id || null,
+    channel,
+    subject,
+    description,
+    status,
+    metadata: { source: 'zapier', user_id, ...data },
     created_at: new Date().toISOString(),
-  };
-
-  const { error } = await supabase
-    .from('interactions')
-    .insert([{
-      id: uuidv4(),
-      contact_id: meeting.contact_id,
-      user_id,
-      channel: 'meeting',
-      subject: meeting.title,
-      description: meeting.description,
-      status: meeting.status,
-      metadata: { zapier_meeting_id: meeting.id, ...data }
-    }]);
-
-  if (error) throw error;
-}
-
-/**
- * Log email from Zapier.
- */
-async function logEmail(data, contact_id, user_id, event_type) {
-  const { supabase } = require('../config/supabase');
-
-  const email = {
-    id: data.id || `zapier_email_${Date.now()}`,
-    contact_id: contact_id || data.contact_id,
-    subject: data.subject,
-    body: data.body || data.message,
-    from: data.from,
-    to: data.to,
-    sent_at: data.sent_at || new Date().toISOString(),
-    source: 'zapier',
-  };
-
-  const { error } = await supabase
-    .from('interactions')
-    .insert([{
-      id: uuidv4(),
-      contact_id: email.contact_id,
-      user_id,
-      channel: 'email',
-      subject: email.subject,
-      description: email.body,
-      status: event_type === 'email_sent' ? 'completed' : 'received',
-      metadata: { zapier_email_id: email.id, from: email.from, to: email.to, ...data }
-    }]);
-
-  if (error) throw error;
+  }]);
 }

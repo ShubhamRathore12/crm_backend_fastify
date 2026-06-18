@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 require('dotenv').config();
 
@@ -39,6 +39,10 @@ const salesFormsRoutes = require('./routes/sales-forms');
 const aiRoutes = require('./routes/ai');
 const integrationsRoutes = require('./routes/integrations');
 const zapierRoutes = require('./routes/zapier');
+const emailInboundRoutes = require('./routes/email-inbound');
+const integrationsExtraRoutes = require('./routes/integrations-extra');
+const settingsRoutes = require('./routes/settings');
+const calendarRoutes = require('./routes/calendar');
 const authRoutes = require('./routes/auth');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -247,6 +251,10 @@ async function buildApp() {
     v1.register(attachmentsRoutes, { prefix: '/attachments' });
     v1.register(salesFormsRoutes, { prefix: '/sales-forms' });
     v1.register(integrationsRoutes, { prefix: '/integrations' });
+    v1.register(integrationsExtraRoutes, { prefix: '/integrations' });
+    v1.register(settingsRoutes, { prefix: '/settings' });
+    v1.register(emailInboundRoutes, { prefix: '/email-inbound' });
+    v1.register(calendarRoutes, { prefix: '/calendar' });
     v1.register(zapierRoutes, { prefix: '/zapier' });
 
     // Analytics
@@ -267,7 +275,7 @@ async function buildApp() {
     schema: {
       tags: ['Health'],
       summary: 'Liveness probe',
-      description: 'Simple health check — always returns 200 if app is running',
+      description: 'Simple health check â€” always returns 200 if app is running',
     },
   }, async (request, reply) => {
     return { status: 'ok', timestamp: new Date().toISOString(), version: '1.0.0' };

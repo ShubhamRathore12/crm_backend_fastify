@@ -5,6 +5,54 @@ const { supabase } = require('../config/supabase');
 const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
 
+// Stable hash so the same record always gets the same dummy values.
+function hashString(s) {
+  let h = 0;
+  for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) >>> 0;
+  return h;
+}
+
+const DUMMY_STAGES = ['prospect', 'contacted', 'qualified', 'proposal', 'won', 'lost'];
+const DUMMY_SOURCES = ['website', 'referral', 'email', 'social', 'cold_call', 'paid_ads', 'event', 'inbound'];
+const DUMMY_PRODUCTS = ['Demat Account', 'Mutual Funds', 'Trading Platform', 'Portfolio Management', 'Insurance'];
+const DUMMY_CAMPAIGNS = ['Q2 Outreach', 'Spring Promo', 'Webinar Follow-up', 'Referral Drive', 'New Year Push'];
+
+/**
+ * Map a contact-backed row (from the contacts table) into the nested lead
+ * shape the frontend renders, filling lead-specific fields with stable dummy
+ * data derived from the row id. Keeps leads working "just as contacts do".
+ */
+function toLeadShape(row) {
+  const id = row.id;
+  const h = hashString(id || row.email || '');
+  const name =
+    row.name ||
+    [row.first_name, row.last_name].filter(Boolean).join(' ').trim() ||
+    (row.email ? String(row.email).split('@')[0] : '') ||
+    'Unknown Lead';
+
+  return {
+    id,
+    contact_id: id,
+    source: row.source || DUMMY_SOURCES[h % DUMMY_SOURCES.length],
+    status: ['active', 'inactive', 'closed'].includes(row.status) ? row.status : 'active',
+    stage: row.stage || DUMMY_STAGES[h % DUMMY_STAGES.length],
+    assigned_to: row.assigned_to || null,
+    product: row.product || DUMMY_PRODUCTS[h % DUMMY_PRODUCTS.length],
+    campaign: row.campaign || DUMMY_CAMPAIGNS[h % DUMMY_CAMPAIGNS.length],
+    custom_fields: row.custom_fields || {},
+    created_at: row.created_at,
+    updated_at: row.updated_at || row.created_at,
+    contacts: {
+      name,
+      email: row.email || '',
+      mobile: row.mobile || row.phone || '',
+      company: row.company || '',
+    },
+    lead_scores: { score: 40 + (h % 100), confidence: 0.6 + (h % 40) / 100 },
+  };
+}
+
 async function leadsRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
 
@@ -54,13 +102,15 @@ async function leadsRoutes(fastify, opts) {
       // Get paginated data with ordering
       const orderDirection = order === 'asc' ? 'ASC' : 'DESC';
       const validSort = ['created_at', 'email', 'name', 'company'].includes(sort) ? sort : 'created_at';
-      const sql = `SELECT id, email, first_name, last_name, phone, company, status, created_at, updated_at FROM contacts${whereClause} ORDER BY ${validSort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      const sql = `SELECT id, email, name, mobile, first_name, last_name, phone, company, status, created_at, updated_at FROM contacts${whereClause} ORDER BY ${validSort} ${orderDirection} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
       params.push(limit, offset);
 
       const result = await db.query(sql, params);
 
+      // Return the nested { contacts, lead_scores } shape the UI renders, with
+      // stable dummy lead fields derived from each row.
       return reply.send({
-        data: result.rows || [],
+        data: (result.rows || []).map(toLeadShape),
         pagination: { total: count, page, limit, pages: Math.ceil((count || 0) / limit) }
       });
     } catch (error) {
@@ -145,7 +195,37 @@ async function leadsRoutes(fastify, opts) {
       .eq('id', leadId)
       .single();
 
-    if (error || !lead) return reply.code(404).send({ error: 'Not Found', message: 'Lead not found' });
+    if (error || !lead) {
+      // The leads table can be empty while the list (which is contact-backed)
+      // links here using a contact id. Fall back to the contacts store so the
+      // detail view always resolves, presenting the contact as a lead with
+      // stable dummy lead fields — just like the contacts views do.
+      try {
+        const db = getPostgresClient();
+        const { rows } = await db.query(
+          'SELECT id, email, name, mobile, first_name, last_name, phone, company, status, created_at, updated_at FROM contacts WHERE id = $1 LIMIT 1',
+          [leadId]
+        );
+        if (rows && rows[0]) {
+          const shaped = toLeadShape(rows[0]);
+          return reply.send({
+            data: {
+              ...shaped,
+              current_score: shaped.lead_scores,
+              opportunities: [],
+              tasks: [],
+              emails: [],
+              interactions: [],
+              history: [],
+              assigned_user: null,
+            },
+          });
+        }
+      } catch (e) {
+        console.error('[Leads] GET /:id contact fallback error:', e);
+      }
+      return reply.code(404).send({ error: 'Not Found', message: 'Lead not found' });
+    }
 
     const response = { data: lead };
 

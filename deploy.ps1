@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 # CRM Backend - Deployment Script
 # Deploy to server via SSH using Docker
 # ============================================================
@@ -36,6 +36,7 @@ if (Test-Path "docker/kong.yml") { scp -i $SSH_KEY docker/kong.yml "${SERVER}:${
 # Copy SQL files
 scp -i $SSH_KEY supabase/schema.sql "${SERVER}:${REMOTE_DIR}/supabase/"
 scp -i $SSH_KEY supabase/seed.sql "${SERVER}:${REMOTE_DIR}/supabase/"
+if (Test-Path "supabase/migrations") { scp -i $SSH_KEY -r supabase/migrations "${SERVER}:${REMOTE_DIR}/supabase/" }
 
 # Copy source code (recursive)
 scp -i $SSH_KEY -r src/ "${SERVER}:${REMOTE_DIR}/src/"
@@ -72,6 +73,10 @@ ssh -i $SSH_KEY $SERVER "cd $REMOTE_DIR && docker compose down --remove-orphans 
 # Step 5: Build and start containers
 Write-Host "[5/6] Building and starting Docker containers..." -ForegroundColor Yellow
 ssh -i $SSH_KEY $SERVER "cd $REMOTE_DIR && docker compose up -d --build"
+
+# Step 5b: Apply database migrations (idempotent)
+Write-Host "[5b/6] Applying database migrations..." -ForegroundColor Yellow
+ssh -i $SSH_KEY $SERVER "if [ -d $REMOTE_DIR/supabase/migrations ]; then for f in `$(ls $REMOTE_DIR/supabase/migrations/*.sql 2>/dev/null | sort); do echo \"  -> applying `$(basename `$f)\"; docker exec -i crm-postgres psql -U `${POSTGRES_USER:-postgres} -d `${POSTGRES_DB:-crm} < `$f || echo '     (migration reported a notice/error, continuing)'; done; else echo '  No migrations folder found'; fi"
 
 # Step 6: Wait and check health
 Write-Host "[6/6] Waiting for services to start..." -ForegroundColor Yellow
