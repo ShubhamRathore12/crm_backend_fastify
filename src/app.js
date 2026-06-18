@@ -38,6 +38,7 @@ const attachmentsRoutes = require('./routes/attachments');
 const salesFormsRoutes = require('./routes/sales-forms');
 const aiRoutes = require('./routes/ai');
 const integrationsRoutes = require('./routes/integrations');
+const zapierRoutes = require('./routes/zapier');
 const authRoutes = require('./routes/auth');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
@@ -246,6 +247,7 @@ async function buildApp() {
     v1.register(attachmentsRoutes, { prefix: '/attachments' });
     v1.register(salesFormsRoutes, { prefix: '/sales-forms' });
     v1.register(integrationsRoutes, { prefix: '/integrations' });
+    v1.register(zapierRoutes, { prefix: '/zapier' });
 
     // Analytics
     v1.register(analyticsRoutes, { prefix: '/analytics' });
