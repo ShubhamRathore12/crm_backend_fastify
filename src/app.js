@@ -45,6 +45,7 @@ const integrationsExtraRoutes = require('./routes/integrations-extra');
 const settingsRoutes = require('./routes/settings');
 const calendarRoutes = require('./routes/calendar');
 const authRoutes = require('./routes/auth');
+const accessControlRoutes = require('./routes/access-control');
 
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -82,15 +83,14 @@ async function buildApp() {
   });
 
   // =========================================================================
-  // DEBUG: Log all requests
+  // Optional request logging (off by default — per-request body logging is a
+  // measurable hot-path cost + log-volume hit). Enable with LOG_REQUESTS=true.
   // =========================================================================
-  app.addHook('preHandler', async (request, reply) => {
-    request.log.info({ 
-      url: request.url, 
-      method: request.method,
-      body: request.body 
-    }, 'PRE-HANDLER HOOK');
-  });
+  if (process.env.LOG_REQUESTS === 'true') {
+    app.addHook('preHandler', async (request) => {
+      request.log.info({ url: request.url, method: request.method, body: request.body }, 'request');
+    });
+  }
 
   // =========================================================================
   // Plugins
@@ -255,6 +255,7 @@ async function buildApp() {
     v1.register(integrationsRoutes, { prefix: '/integrations' });
     v1.register(integrationsExtraRoutes, { prefix: '/integrations' });
     v1.register(settingsRoutes, { prefix: '/settings' });
+    v1.register(accessControlRoutes, { prefix: '/access-control' });
     v1.register(emailInboundRoutes, { prefix: '/email-inbound' });
     v1.register(calendarRoutes, { prefix: '/calendar' });
     v1.register(zapierRoutes, { prefix: '/zapier' });

@@ -22,6 +22,7 @@ const { createMeeting } = require('../services/meetService');
  */
 async function emailInboundRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('inbox'));
 
   const DEFAULT_FROM_NAME = process.env.MAILBOX_FROM_NAME || 'Sushil Pradhan';
   const DEFAULT_FROM_EMAIL = process.env.MAILBOX_FROM_EMAIL || 'sushilpradhan@primeosys.com';

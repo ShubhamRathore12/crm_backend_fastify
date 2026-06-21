@@ -4,9 +4,11 @@ const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
 const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
+const { notifyTaskAssigned } = require('../services/notificationService');
 
 async function tasksRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('tasks'));
 
   // ─── GET /stats ──────────────────────────────────────────────────
   fastify.get('/stats', {
@@ -117,6 +119,9 @@ async function tasksRoutes(fastify, opts) {
     const { data, error } = await supabase.from('sales_marketing_tasks')
       .insert({ id: uuidv4(), ...request.body, created_at: now, updated_at: now }).select().single();
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+    if (data?.assignee_id) {
+      notifyTaskAssigned({ id: data.id, assignee_id: data.assignee_id, title: data.title, description: data.description, due_date: data.end_date, priority: data.priority });
+    }
     return reply.code(201).send({ data });
   });
 
@@ -142,6 +147,9 @@ async function tasksRoutes(fastify, opts) {
       .update({ ...request.body, updated_at: new Date().toISOString() }).eq('id', request.params.id).select().single();
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
     if (!data) return reply.code(404).send({ error: 'Not Found' });
+    if (request.body.assignee_id) {
+      notifyTaskAssigned({ id: data.id, assignee_id: data.assignee_id, title: data.title, description: data.description, due_date: data.end_date, priority: data.priority });
+    }
     return reply.send({ data });
   });
 
@@ -253,6 +261,7 @@ async function tasksRoutes(fastify, opts) {
     const { data, error } = await supabase.from('tasks')
       .insert({ id: uuidv4(), ...request.body, created_at: new Date().toISOString() }).select().single();
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+    if (data?.assigned_to) notifyTaskAssigned(data);
     return reply.code(201).send({ data });
   });
 
@@ -275,6 +284,7 @@ async function tasksRoutes(fastify, opts) {
       .update(request.body).eq('id', request.params.id).select().single();
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
     if (!data) return reply.code(404).send({ error: 'Not Found' });
+    if (request.body.assigned_to) notifyTaskAssigned(data);
     return reply.send({ data });
   });
 
@@ -313,6 +323,11 @@ async function tasksRoutes(fastify, opts) {
     const { task_ids, assigned_to } = request.body;
     const { error } = await supabase.from('tasks').update({ assigned_to }).in('id', task_ids);
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+
+    // Notify the new assignee once per task (fire-and-forget).
+    const { data: assignedTasks } = await supabase.from('tasks').select('*').in('id', task_ids);
+    (assignedTasks || []).forEach((t) => notifyTaskAssigned(t));
+
     return reply.send({ updated: task_ids.length });
   });
 }

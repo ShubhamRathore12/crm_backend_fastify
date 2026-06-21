@@ -21,6 +21,7 @@ function gcal() { return require('../services/googleCalendarService'); }
  */
 async function integrationsExtraRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('integrations'));
 
   // â”€â”€â”€ POST /meeting-invite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   fastify.post('/meeting-invite', {

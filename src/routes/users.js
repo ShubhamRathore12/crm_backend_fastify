@@ -12,6 +12,7 @@ const USER_SAFE_COLS = 'id, name, email, role, team_id, status, created_at';
 
 async function usersRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('users'));
 
   // ─── GET /agents ─────────────────────────────────────────────────
   fastify.get('/agents', {

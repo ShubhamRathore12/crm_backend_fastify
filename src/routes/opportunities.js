@@ -4,9 +4,53 @@ const { v4: uuidv4 } = require('uuid');
 const { supabase } = require('../config/supabase');
 const { getPostgresClient } = require('../config/postgres');
 const { authenticate } = require('../middleware/auth');
+const { getReferenceData, buildSeedOpps } = require('../config/opps-seed');
+
+// Lazily create + seed the LeadSquared-style opportunities store. Idempotent.
+let _uiTableReady = false;
+async function ensureUiOppsTable(db) {
+  if (_uiTableReady) return;
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS ui_opportunities (
+      id          UUID PRIMARY KEY,
+      lead_id     UUID,
+      name        TEXT,
+      owner       TEXT,
+      product     TEXT,
+      status      TEXT,
+      stage       TEXT,
+      type        TEXT,
+      sort_order  DOUBLE PRECISION NOT NULL DEFAULT 0,
+      data        JSONB NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.query('CREATE INDEX IF NOT EXISTS ui_opportunities_lead_id_idx ON ui_opportunities (lead_id)');
+
+  const { rows } = await db.query('SELECT COUNT(*)::int AS count FROM ui_opportunities');
+  if ((rows[0]?.count || 0) === 0) {
+    const seed = buildSeedOpps();
+    for (let i = 0; i < seed.length; i++) {
+      const o = seed[i];
+      await db.query(
+        `INSERT INTO ui_opportunities (id, lead_id, name, owner, product, status, stage, type, sort_order, data)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb) ON CONFLICT (id) DO NOTHING`,
+        [o.id, null, o.name, o.owner, o.broadProduct, o.status, o.stage, o.type, i, JSON.stringify(o)]
+      );
+    }
+  }
+  _uiTableReady = true;
+}
+
+// Map an Opp object to the indexed columns + JSONB payload.
+function uiInsertParams(o) {
+  return [o.id, o.lead_id || null, o.name, o.owner, o.broadProduct, o.status, o.stage, o.type];
+}
 
 async function opportunitiesRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('opportunities'));
 
   // ─── GET /pipeline ───────────────────────────────────────────────
   fastify.get('/pipeline', {
@@ -214,6 +258,7 @@ async function opportunitiesRoutes(fastify, opts) {
           probability: { type: 'integer', minimum: 0, maximum: 100, default: 10 },
           expected_closed_at: { type: 'string', format: 'date-time' },
           assigned_to: { type: 'string', format: 'uuid' },
+          product: { type: 'string' },
         },
       },
     },
@@ -222,6 +267,14 @@ async function opportunitiesRoutes(fastify, opts) {
     const { data, error } = await supabase.from('opportunities')
       .insert({ id: uuidv4(), ...request.body, created_at: now, updated_at: now }).select().single();
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+
+    // Record the initial product in history (latest product lives on the row).
+    if (data?.product) {
+      await supabase.from('opportunity_product_history').insert({
+        id: uuidv4(), opportunity_id: data.id, product: data.product,
+        changed_by: request.user?.id || null, created_at: now,
+      }).then(() => {}).catch(() => {});
+    }
     return reply.code(201).send({ data });
   });
 
@@ -242,15 +295,31 @@ async function opportunitiesRoutes(fastify, opts) {
           probability: { type: 'integer' },
           expected_closed_at: { type: 'string', format: 'date-time' },
           assigned_to: { type: 'string', format: 'uuid' },
+          product: { type: 'string' },
         },
       },
     },
   }, async (request, reply) => {
+    // Capture previous product so we only append history on an actual change.
+    let prevProduct = null;
+    if (request.body.product !== undefined) {
+      const { data: prev } = await supabase.from('opportunities')
+        .select('product').eq('id', request.params.id).single();
+      prevProduct = prev?.product ?? null;
+    }
+
     const { data, error } = await supabase.from('opportunities')
       .update({ ...request.body, updated_at: new Date().toISOString() })
       .eq('id', request.params.id).select().single();
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
     if (!data) return reply.code(404).send({ error: 'Not Found' });
+
+    if (request.body.product !== undefined && request.body.product && request.body.product !== prevProduct) {
+      await supabase.from('opportunity_product_history').insert({
+        id: uuidv4(), opportunity_id: data.id, product: data.product,
+        changed_by: request.user?.id || null, created_at: new Date().toISOString(),
+      }).then(() => {}).catch(() => {});
+    }
     return reply.send({ data });
   });
 
@@ -294,6 +363,204 @@ async function opportunitiesRoutes(fastify, opts) {
       .update(updates).in('id', ids);
     if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
     return reply.send({ updated: ids.length, stage });
+  });
+
+  // ─── GET /:id/product-history ── latest-first product change log ─────────
+  fastify.get('/:id/product-history', {
+    schema: {
+      tags: ['Opportunities'],
+      summary: 'Product change history for an opportunity (latest first)',
+      params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } }, required: ['id'] },
+    },
+  }, async (request, reply) => {
+    const { data, error } = await supabase.from('opportunity_product_history')
+      .select('id, product, changed_by, created_at')
+      .eq('opportunity_id', request.params.id)
+      .order('created_at', { ascending: false });
+    if (error) return reply.code(500).send({ error: 'Database error', message: error.message });
+    return reply.send({ data: data || [] });
+  });
+
+  // ════════════════════════════════════════════════════════════════════════
+  // LeadSquared-style UI opportunities (backend-backed; identical UI shape).
+  // ════════════════════════════════════════════════════════════════════════
+
+  // ─── GET /reference ── dropdown lists (owners, products, statuses, …) ────
+  fastify.get('/reference', {
+    // Static lists — cache hard (server LRU/Redis + browser).
+    config: { cache: { ttl: 600000 }, cacheControl: 'public, max-age=600' },
+    schema: { tags: ['Opportunities'], summary: 'Opportunity reference lists' },
+  }, async (request, reply) => {
+    return reply.send({ data: getReferenceData() });
+  });
+
+  // ─── GET /ui ── list (filters: lead_id, product, owner, status, type, search) ─
+  fastify.get('/ui', {
+    schema: {
+      tags: ['Opportunities'], summary: 'List UI opportunities',
+      querystring: {
+        type: 'object',
+        properties: {
+          lead_id: { type: 'string' }, product: { type: 'string' },
+          owner: { type: 'string' }, status: { type: 'string' },
+          type: { type: 'string' }, search: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const db = getPostgresClient();
+      await ensureUiOppsTable(db);
+
+      const { lead_id, product, owner, status, type, search } = request.query;
+      const params = [];
+      const where = [];
+      if (lead_id) { where.push(`lead_id = $${params.length + 1}`); params.push(lead_id); }
+      if (product) { where.push(`product = $${params.length + 1}`); params.push(product); }
+      if (owner) { where.push(`owner = $${params.length + 1}`); params.push(owner); }
+      if (status) { where.push(`status = $${params.length + 1}`); params.push(status); }
+      if (type) { where.push(`type = $${params.length + 1}`); params.push(type); }
+      if (search) { where.push(`name ILIKE $${params.length + 1}`); params.push(`%${search}%`); }
+
+      const clause = where.length ? ' WHERE ' + where.join(' AND ') : '';
+      const result = await db.query(
+        `SELECT id, data FROM ui_opportunities${clause} ORDER BY sort_order ASC`,
+        params
+      );
+      const data = (result.rows || []).map((r) => ({ ...r.data, id: r.id }));
+      return reply.send({ data });
+    } catch (error) {
+      console.error('[Opportunities] GET /ui error:', error);
+      return reply.code(500).send({ error: 'Database error', message: error.message });
+    }
+  });
+
+  // ─── GET /ui/:id ─────────────────────────────────────────────────────────
+  fastify.get('/ui/:id', {
+    schema: {
+      tags: ['Opportunities'], summary: 'Get a UI opportunity',
+      params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } }, required: ['id'] },
+    },
+  }, async (request, reply) => {
+    const db = getPostgresClient();
+    await ensureUiOppsTable(db);
+    const result = await db.query('SELECT id, data FROM ui_opportunities WHERE id = $1', [request.params.id]);
+    if (!result.rows[0]) return reply.code(404).send({ error: 'Not Found' });
+    return reply.send({ data: { ...result.rows[0].data, id: result.rows[0].id } });
+  });
+
+  // ─── POST /ui ── create (body = full Opp; newest appears first) ──────────
+  fastify.post('/ui', {
+    schema: {
+      tags: ['Opportunities'], summary: 'Create a UI opportunity',
+      body: { type: 'object', additionalProperties: true, required: ['name'], properties: { name: { type: 'string' } } },
+    },
+  }, async (request, reply) => {
+    const db = getPostgresClient();
+    await ensureUiOppsTable(db);
+
+    const id = request.body.id || uuidv4();
+    const opp = { ...request.body, id };
+    const [, leadId, name, owner, product, status, stage, type] = uiInsertParams(opp);
+    const sortOrder = -Date.now(); // newest first under ORDER BY sort_order ASC
+
+    await db.query(
+      `INSERT INTO ui_opportunities (id, lead_id, name, owner, product, status, stage, type, sort_order, data)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+      [id, leadId, name, owner, product, status, stage, type, sortOrder, JSON.stringify(opp)]
+    );
+    return reply.code(201).send({ data: opp });
+  });
+
+  // ─── PUT /ui/:id ── update (merge patch into stored Opp) ─────────────────
+  fastify.put('/ui/:id', {
+    schema: {
+      tags: ['Opportunities'], summary: 'Update a UI opportunity',
+      params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } }, required: ['id'] },
+      body: { type: 'object', additionalProperties: true },
+    },
+  }, async (request, reply) => {
+    const db = getPostgresClient();
+    await ensureUiOppsTable(db);
+
+    const cur = await db.query('SELECT data FROM ui_opportunities WHERE id = $1', [request.params.id]);
+    if (!cur.rows[0]) return reply.code(404).send({ error: 'Not Found' });
+
+    const merged = { ...cur.rows[0].data, ...request.body, id: request.params.id };
+    const [, leadId, name, owner, product, status, stage, type] = uiInsertParams(merged);
+    await db.query(
+      `UPDATE ui_opportunities
+         SET lead_id=$2, name=$3, owner=$4, product=$5, status=$6, stage=$7, type=$8, data=$9::jsonb, updated_at=NOW()
+       WHERE id=$1`,
+      [request.params.id, leadId, name, owner, product, status, stage, type, JSON.stringify(merged)]
+    );
+    return reply.send({ data: merged });
+  });
+
+  // ─── DELETE /ui/:id ──────────────────────────────────────────────────────
+  fastify.delete('/ui/:id', {
+    schema: {
+      tags: ['Opportunities'], summary: 'Delete a UI opportunity',
+      params: { type: 'object', properties: { id: { type: 'string', format: 'uuid' } }, required: ['id'] },
+    },
+  }, async (request, reply) => {
+    const db = getPostgresClient();
+    await ensureUiOppsTable(db);
+    await db.query('DELETE FROM ui_opportunities WHERE id = $1', [request.params.id]);
+    return reply.code(204).send();
+  });
+
+  // ─── POST /ui/ensure-for-lead ── find-or-create opp for a lead+product ───
+  // Used by the Leads screen: clicking a lead's product opens its opportunity.
+  fastify.post('/ui/ensure-for-lead', {
+    schema: {
+      tags: ['Opportunities'], summary: 'Find or create the opportunity for a lead',
+      body: {
+        type: 'object', required: ['lead_id'],
+        properties: {
+          lead_id: { type: 'string' },
+          name: { type: 'string' }, email: { type: 'string' },
+          phone: { type: 'string' }, product: { type: 'string' },
+          owner: { type: 'string' },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const db = getPostgresClient();
+    await ensureUiOppsTable(db);
+    const { lead_id, name, email, phone, product, owner } = request.body;
+
+    // Prefer an existing opp for this lead (matching product if given).
+    const params = [lead_id];
+    let q = 'SELECT id, data FROM ui_opportunities WHERE lead_id = $1';
+    if (product) { q += ' AND product = $2'; params.push(product); }
+    q += ' ORDER BY sort_order ASC LIMIT 1';
+    const existing = await db.query(q, params);
+    if (existing.rows[0]) {
+      return reply.send({ data: { ...existing.rows[0].data, id: existing.rows[0].id }, created: false });
+    }
+
+    const ref = getReferenceData();
+    const id = uuidv4();
+    const now = new Date().toISOString().slice(0, 19);
+    const ownerObj = ref.OWNERS.find((o) => o.name === owner) || ref.OWNERS[0];
+    const opp = {
+      id, name: name || 'New Opportunity',
+      status: 'Open - Not Connected', stage: 'Prospect',
+      type: 'Product Opportunity', diyFlag: 'No', upsale: 'New',
+      createdOn: now, agentAssigned: now, noOfAttempts: 0, noOfConnects: 0,
+      ownerUpdate: now.replace('T', ' '), owner: ownerObj.name, ownerEmail: ownerObj.email,
+      contactName: name || '', phone: phone || '', email: email || '',
+      company: 'Stoxkart', broadProduct: product || ref.BROAD_PRODUCTS[0],
+      source: product || 'STX Trading Account', callStatus: '--', talismaId: '--',
+      opportunityId: String(16000000 + (Date.now() % 100000)), lead_id,
+    };
+    await db.query(
+      `INSERT INTO ui_opportunities (id, lead_id, name, owner, product, status, stage, type, sort_order, data)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+      [id, lead_id, opp.name, opp.owner, opp.broadProduct, opp.status, opp.stage, opp.type, -Date.now(), JSON.stringify(opp)]
+    );
+    return reply.code(201).send({ data: opp, created: true });
   });
 }
 

@@ -6,6 +6,7 @@ const { authenticate } = require('../middleware/auth');
 
 async function emailSendsRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('inbox'));
 
   fastify.get('/stats', {
     schema: { tags: ['Email Sends'], summary: 'Email send statistics' },

@@ -40,6 +40,7 @@ function validateTemplate(template) {
 
 async function templatesRoutes(fastify, options) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('templates'));
 
   /**
    * GET /templates

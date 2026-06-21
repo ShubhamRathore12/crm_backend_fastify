@@ -8,6 +8,7 @@ const { getQueueStats } = require('../services/queueService');
 
 async function analyticsRoutes(fastify, options) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('reports'));
 
   // Get optimized database client
   const supabase = getOptimizedSupabaseClient();

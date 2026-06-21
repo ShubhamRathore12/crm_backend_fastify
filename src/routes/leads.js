@@ -55,6 +55,7 @@ function toLeadShape(row) {
 
 async function leadsRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('leads'));
 
   // ────────────────────────────────────────────────────────────────
   // GET /leads - List all leads with pagination, filtering, sorting

@@ -19,6 +19,7 @@ const { createMeeting } = require('../services/meetService');
  */
 async function calendarRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('calendar'));
 
   // ─── GET /events ────────────────────────────────────────────
   fastify.get('/events', {

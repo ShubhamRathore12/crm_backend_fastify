@@ -10,6 +10,7 @@ const CAMPAIGN_STATUSES = ['draft', 'scheduled', 'running', 'dispatched', 'pause
 
 async function campaignsRoutes(fastify, options) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('campaigns'));
 
   /**
    * GET /campaigns

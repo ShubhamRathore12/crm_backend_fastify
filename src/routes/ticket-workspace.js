@@ -12,6 +12,7 @@ const AVATAR_COLORS = ['bg-blue-500', 'bg-emerald-500', 'bg-rose-500', 'bg-amber
 // ticket_workspace JSONB table seeded by scripts/seed-ticket-workspace.js.
 async function ticketWorkspaceRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('tickets'));
 
   // ─── GET / ─── list tickets (returns full rich objects) ───────────
   fastify.get('/', {

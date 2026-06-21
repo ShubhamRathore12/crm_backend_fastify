@@ -7,6 +7,7 @@ const { authenticate } = require('../middleware/auth');
 
 async function workflowsRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('workflows'));
 
   // ─── GET /stats ──────────────────────────────────────────────────
   fastify.get('/stats', {

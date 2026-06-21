@@ -7,6 +7,7 @@ const { authenticate } = require('../middleware/auth');
 
 async function interactionsRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('interactions'));
 
   // ─── GET /insights ───────────────────────────────────────────────
   fastify.get('/insights', {

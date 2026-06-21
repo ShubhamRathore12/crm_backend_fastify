@@ -6,6 +6,7 @@ const { authenticate } = require('../middleware/auth');
 
 async function callsRoutes(fastify, opts) {
   fastify.addHook('preHandler', authenticate);
+  fastify.addHook('preHandler', require('../middleware/rbac').authorize('calls'));
 
   fastify.get('/stats', {
     schema: { tags: ['Calls'], summary: 'Call statistics' },
