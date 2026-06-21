@@ -28,6 +28,7 @@ const webhooksRoutes = require('./routes/webhooks');
 const leadsRoutes = require('./routes/leads');
 const opportunitiesRoutes = require('./routes/opportunities');
 const interactionsRoutes = require('./routes/interactions');
+const ticketWorkspaceRoutes = require('./routes/ticket-workspace');
 const tasksRoutes = require('./routes/tasks');
 const usersRoutes = require('./routes/users');
 const workflowsRoutes = require('./routes/workflows');
@@ -231,6 +232,7 @@ async function buildApp() {
     v1.register(leadsRoutes, { prefix: '/leads' });
     v1.register(opportunitiesRoutes, { prefix: '/opportunities' });
     v1.register(interactionsRoutes, { prefix: '/interactions' });
+    v1.register(ticketWorkspaceRoutes, { prefix: '/ticket-workspace' });
     v1.register(tasksRoutes, { prefix: '/tasks' });
     v1.register(usersRoutes, { prefix: '/users' });
 
